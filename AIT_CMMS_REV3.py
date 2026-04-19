@@ -14,6 +14,7 @@ from kpi_manager import KPIManager
 from user_management_ui import UserManagementDialog
 from password_change_ui import show_password_change_dialog
 from backup_ui import BackupUI
+from csv_manager import CSVManager
 import shutil
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -5069,85 +5070,190 @@ class AITCMMSSystem:
     
     # Add this method to your class
     def setup_program_colors(self):
-        """Set up the color scheme for the entire program"""
-    
-        # Create style object
+        """Set up the AIT Dark-Pro color scheme for the entire program."""
+
+        # ── Palette ──────────────────────────────────────────────────────────
+        BG_APP      = "#0d1b2a"   # deep navy — main window background
+        BG_PANEL    = "#1b2838"   # panel / frame fill
+        BG_CARD     = "#243447"   # card / label-frame fill
+        BG_INPUT    = "#1a2535"   # entry / combobox fields
+        BG_ROW_ALT  = "#1e2f42"   # treeview alternating row
+        BG_HEADER   = "#0a1628"   # treeview column headers
+        BG_SEL      = "#1a5a96"   # selected row
+
+        ACCENT      = "#2196f3"   # primary blue
+        ACCENT_HOV  = "#42a5f5"   # blue hover
+        ACCENT_ACT  = "#1565c0"   # blue pressed
+        GOLD        = "#ffc107"   # amber / warning highlight
+        GOLD_HOV    = "#ffca28"
+
+        GREEN       = "#26a65b"   # success / complete
+        GREEN_HOV   = "#2ecc71"
+        RED         = "#e53935"   # danger / delete
+        RED_HOV     = "#ef5350"
+        ORANGE      = "#f57c00"   # warning action
+
+        TEXT_PRI    = "#e8f1f8"   # primary text (near-white)
+        TEXT_SEC    = "#90a4b8"   # secondary / label text
+        TEXT_DIM    = "#546e7a"   # dimmed / placeholder text
+
+        BORDER      = "#2d4057"   # subtle border
+
+        FONT_SM  = ('Segoe UI', 11)
+        FONT_MD  = ('Segoe UI', 12)
+        FONT_LG  = ('Segoe UI', 13)
+        FONT_HDR = ('Segoe UI', 13, 'bold')
+        FONT_TAB = ('Segoe UI', 12, 'bold')
+
+        # ── Base ─────────────────────────────────────────────────────────────
         self.style = ttk.Style()
-    
-        # Choose base theme
-        self.style.theme_use('clam')  # Good base for customization
-    
-        # Set main window background
-        self.root.configure(bg="#e8f4f8")  # Light blue-gray
-    
-        # Configure Treeview (your asset lists) with larger fonts
-        self.style.configure("Treeview",
-                        background="#ffffff",        # White background
-                        foreground="#1e3a8a",       # Dark blue text
-                        rowheight=45,                # Increased for better readability
-                        fieldbackground="#ffffff",   # White field background
-                        font=('TkDefaultFont', 12))  # Increased row font size
+        self.style.theme_use('clam')
+        self.root.configure(bg=BG_APP)
 
-        # Treeview headers - increased font size
-        self.style.configure("Treeview.Heading",
-                        background="#3b82f6",       # Blue headers
-                        foreground="white",
-                        font=('TkDefaultFont', 16, 'bold'))  # Increased for better readability
+        # Store palette on self so other widgets can reference it
+        self.colors = {
+            'bg_app': BG_APP, 'bg_panel': BG_PANEL, 'bg_card': BG_CARD,
+            'bg_input': BG_INPUT, 'accent': ACCENT, 'gold': GOLD,
+            'green': GREEN, 'red': RED, 'text_pri': TEXT_PRI, 'text_sec': TEXT_SEC,
+            'border': BORDER,
+        }
 
-        # Buttons - increased font size
-        self.style.configure("TButton",
-                        background="#3b82f6",       # Blue buttons
-                        foreground="white",
-                        padding=(15, 8),             # Increased padding for larger buttons
-                        relief="flat",
-                        font=('TkDefaultFont', 15))  # Increased for better readability
-
-        # Button hover effects
-        self.style.map("TButton",
-                    background=[('active', '#60a5fa'),    # Lighter blue on hover
-                                ('pressed', '#1d4ed8')])   # Darker blue when pressed
-
-        # LabelFrames (your control sections) - increased font size
-        self.style.configure("TLabelframe",
-                        background="#e8f4f8",       # Light blue-gray
-                        foreground="#1e3a8a",       # Dark blue text
-                        borderwidth=2,
-                        relief="groove")
-
-        self.style.configure("TLabelframe.Label",
-                        background="#e8f4f8",
-                        foreground="#1e3a8a",
-                        font=('TkDefaultFont', 16, 'bold'))  # Increased for better readability
-    
-        # Frames
+        # ── Frames & Labels ───────────────────────────────────────────────────
         self.style.configure("TFrame",
-                        background="#e8f4f8")
-    
-        # Entry widgets
+            background=BG_PANEL)
+        self.style.configure("TLabel",
+            background=BG_PANEL, foreground=TEXT_PRI, font=FONT_MD)
+        self.style.configure("TLabelframe",
+            background=BG_CARD, foreground=GOLD,
+            borderwidth=1, relief="flat")
+        self.style.configure("TLabelframe.Label",
+            background=BG_CARD, foreground=GOLD, font=FONT_HDR)
+
+        # ── Notebook / Tabs ───────────────────────────────────────────────────
+        self.style.configure("TNotebook",
+            background=BG_APP, borderwidth=0, tabmargins=[2, 4, 0, 0])
+        self.style.configure("TNotebook.Tab",
+            background=BG_CARD, foreground=TEXT_SEC,
+            padding=[18, 8], font=FONT_TAB,
+            borderwidth=0)
+        self.style.map("TNotebook.Tab",
+            background=[("selected", ACCENT),   ("active", BG_SEL)],
+            foreground=[("selected", "#ffffff"), ("active", TEXT_PRI)],
+            expand=[("selected", [0, 0, 0, 2])])
+
+        # ── Treeview ──────────────────────────────────────────────────────────
+        self.style.configure("Treeview",
+            background=BG_PANEL, foreground=TEXT_PRI,
+            rowheight=40, fieldbackground=BG_PANEL,
+            font=FONT_MD, borderwidth=0)
+        self.style.configure("Treeview.Heading",
+            background=BG_HEADER, foreground=GOLD,
+            font=FONT_HDR, relief="flat", borderwidth=0)
+        self.style.map("Treeview",
+            background=[("selected", BG_SEL)],
+            foreground=[("selected", "#ffffff")])
+        self.style.map("Treeview.Heading",
+            background=[("active", BG_SEL)])
+
+        # ── Buttons ───────────────────────────────────────────────────────────
+        # Default / Primary
+        self.style.configure("TButton",
+            background=ACCENT, foreground="#ffffff",
+            padding=(14, 7), relief="flat", font=FONT_MD, borderwidth=0)
+        self.style.map("TButton",
+            background=[("active", ACCENT_HOV), ("pressed", ACCENT_ACT),
+                        ("disabled", BG_CARD)],
+            foreground=[("disabled", TEXT_DIM)])
+
+        # Accent (gold) – highlighted primary action
+        self.style.configure("Accent.TButton",
+            background=GOLD, foreground="#0d1b2a",
+            padding=(14, 7), relief="flat", font=FONT_HDR, borderwidth=0)
+        self.style.map("Accent.TButton",
+            background=[("active", GOLD_HOV), ("pressed", "#e65100")])
+
+        # Success / green
+        self.style.configure("Success.TButton",
+            background=GREEN, foreground="#ffffff",
+            padding=(14, 7), relief="flat", font=FONT_MD, borderwidth=0)
+        self.style.map("Success.TButton",
+            background=[("active", GREEN_HOV), ("pressed", "#1a7a41")])
+
+        # Danger / red
+        self.style.configure("Danger.TButton",
+            background=RED, foreground="#ffffff",
+            padding=(14, 7), relief="flat", font=FONT_MD, borderwidth=0)
+        self.style.map("Danger.TButton",
+            background=[("active", RED_HOV), ("pressed", "#b71c1c")])
+
+        # Warning / orange
+        self.style.configure("Warning.TButton",
+            background=ORANGE, foreground="#ffffff",
+            padding=(14, 7), relief="flat", font=FONT_MD, borderwidth=0)
+        self.style.map("Warning.TButton",
+            background=[("active", "#ff8f00"), ("pressed", "#e65100")])
+
+        # Toolbar buttons (flatter, smaller)
+        self.style.configure("Toolbar.TButton",
+            background=BG_CARD, foreground=TEXT_PRI,
+            padding=(10, 5), relief="flat", font=FONT_SM, borderwidth=0)
+        self.style.map("Toolbar.TButton",
+            background=[("active", BG_SEL), ("pressed", ACCENT_ACT)])
+
+        # ── Entry / Combobox ──────────────────────────────────────────────────
         self.style.configure("TEntry",
-                        fieldbackground="#ffffff",
-                        foreground="#1e3a8a",
-                        borderwidth=1,
-                        relief="solid")
-    
-        # Combobox
+            fieldbackground=BG_INPUT, foreground=TEXT_PRI,
+            insertcolor=TEXT_PRI, borderwidth=1,
+            relief="flat", font=FONT_MD)
+        self.style.map("TEntry",
+            fieldbackground=[("focus", "#1e3550")])
+
         self.style.configure("TCombobox",
-                        fieldbackground="#ffffff",
-                        foreground="#1e3a8a",
-                        arrowcolor="#3b82f6")
-    
-        # Scrollbars
+            fieldbackground=BG_INPUT, foreground=TEXT_PRI,
+            background=BG_CARD, arrowcolor=ACCENT,
+            selectbackground=BG_SEL, selectforeground="#ffffff",
+            font=FONT_MD)
+        self.style.map("TCombobox",
+            fieldbackground=[("readonly", BG_INPUT)],
+            foreground=[("readonly", TEXT_PRI)])
+
+        # ── Scrollbars ────────────────────────────────────────────────────────
         self.style.configure("Vertical.TScrollbar",
-                        background="#d1d5db",
-                        troughcolor="#f3f4f6",
-                        borderwidth=1,
-                        arrowcolor="#3b82f6")
-    
+            background=BG_CARD, troughcolor=BG_APP,
+            borderwidth=0, arrowcolor=ACCENT, gripcount=0)
         self.style.configure("Horizontal.TScrollbar",
-                        background="#d1d5db",
-                        troughcolor="#f3f4f6",
-                        borderwidth=1,
-                        arrowcolor="#3b82f6")
+            background=BG_CARD, troughcolor=BG_APP,
+            borderwidth=0, arrowcolor=ACCENT, gripcount=0)
+
+        # ── Separator ─────────────────────────────────────────────────────────
+        self.style.configure("TSeparator", background=BORDER)
+
+        # ── Checkbutton / Radiobutton ─────────────────────────────────────────
+        self.style.configure("TCheckbutton",
+            background=BG_PANEL, foreground=TEXT_PRI, font=FONT_MD)
+        self.style.map("TCheckbutton",
+            background=[("active", BG_PANEL)])
+        self.style.configure("TRadiobutton",
+            background=BG_PANEL, foreground=TEXT_PRI, font=FONT_MD)
+        self.style.map("TRadiobutton",
+            background=[("active", BG_PANEL)])
+
+        # ── Progressbar ───────────────────────────────────────────────────────
+        self.style.configure("TProgressbar",
+            background=ACCENT, troughcolor=BG_CARD,
+            borderwidth=0, lightcolor=ACCENT, darkcolor=ACCENT)
+
+        # ── Scale ─────────────────────────────────────────────────────────────
+        self.style.configure("TScale",
+            background=BG_PANEL, troughcolor=BG_CARD,
+            slidercolor=ACCENT)
+
+        # Apply background colour to the root canvas used by the notebook scroller
+        try:
+            self.main_canvas.configure(background=BG_APP)
+            self.scrollable_frame.configure(style="TFrame")
+        except Exception:
+            pass
 
     
     
@@ -5694,65 +5800,84 @@ class AITCMMSSystem:
 
     
     def add_logo_to_main_window(self):
-        """Add AIT logo to the main application window - LEFT SIDE ONLY"""
-        try:
-            from tkinter import PhotoImage
-            from PIL import Image, ImageTk
-            
-            # Get the directory where the script is located
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            img_dir = os.path.join(script_dir, "img")
-            logo_path = os.path.join(img_dir, "ait_logo.png")
-        
-            # Create img directory if it doesn't exist
-            if not os.path.exists(img_dir):
-                os.makedirs(img_dir)
-                print(f"Created img directory: {img_dir}")
-        
-            # Alternative paths to try
-            alternative_paths = [
-                os.path.join(script_dir, "ait_logo.png"),  # Same directory as script
-                os.path.join(script_dir, "img", "ait_logo.png"),  # img subdirectory
-                "ait_logo.png"  # Current working directory
-            ]
-        
-            logo_found = False
-            for path in alternative_paths:
-                if os.path.exists(path):
-                    logo_path = path
-                    logo_found = True
-                    print(f"Found logo at: {logo_path}")
+        """Build the branded header bar at the top of the main window."""
+        HDR_BG   = "#0a1628"   # near-black navy
+        HDR_ACC  = "#2196f3"   # blue accent stripe
+        GOLD     = "#ffc107"
+        TEXT_PRI = "#e8f1f8"
+        TEXT_SEC = "#90a4b8"
+
+        # ── Outer header frame ────────────────────────────────────────────────
+        header_frame = tk.Frame(self.root, bg=HDR_BG, height=80)
+        header_frame.pack(side='top', fill='x')
+        header_frame.pack_propagate(False)
+
+        # ── Blue accent stripe at very top ────────────────────────────────────
+        accent_stripe = tk.Frame(self.root, bg=HDR_ACC, height=3)
+        accent_stripe.pack(side='top', fill='x')
+
+        # ── Logo (left side) ─────────────────────────────────────────────────
+        self.logo_image = None
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        logo_candidates = [
+            os.path.join(script_dir, "img", "ait_logo.png"),
+            os.path.join(script_dir, "img", "ait_Logo.png"),
+            os.path.join(script_dir, "ait_logo.png"),
+        ]
+        for lp in logo_candidates:
+            if os.path.exists(lp):
+                try:
+                    from PIL import Image, ImageTk
+                    pil_img = Image.open(lp).resize((160, 52), Image.Resampling.LANCZOS)
+                    self.logo_image = ImageTk.PhotoImage(pil_img)
                     break
-        
-            if not logo_found:
-                print(f"Logo file not found. Tried paths: {alternative_paths}")
-                print("Please place your logo file in one of these locations.")
-                return
-            
-            if os.path.exists(logo_path):
-                # Open and resize image for tkinter
-                pil_image = Image.open(logo_path)
-                pil_image = pil_image.resize((200, 60), Image.Resampling.LANCZOS)  # Reasonable size for left corner
-                
-                # Convert to PhotoImage
-                self.logo_image = ImageTk.PhotoImage(pil_image)
-                
-                # Create logo frame at top left of window
-                logo_frame = ttk.Frame(self.root)
-                logo_frame.pack(side='top', fill='x', padx=10, pady=5)
-            
-                # Add logo label (left aligned)
-                logo_label = ttk.Label(logo_frame, image=self.logo_image)
-                logo_label.pack(side='left')
-                
-                # Optional: Add a subtle separator line below
-                separator = ttk.Separator(self.root, orient='horizontal')
-                separator.pack(fill='x', padx=10, pady=2)
-            
-        except ImportError:
-            print("PIL (Pillow) not installed. Install with: pip install Pillow")
-        except Exception as e:
-            print(f"Error loading logo: {e}")
+                except Exception as _e:
+                    print(f"Logo load error: {_e}")
+
+        if self.logo_image:
+            logo_lbl = tk.Label(header_frame, image=self.logo_image,
+                                bg=HDR_BG, bd=0)
+            logo_lbl.pack(side='left', padx=(16, 8), pady=10)
+        else:
+            # Fallback text badge when image is missing
+            tk.Label(header_frame, text="AIT", bg=HDR_ACC,
+                     fg="#ffffff", font=('Segoe UI', 20, 'bold'),
+                     padx=14, pady=6).pack(side='left', padx=(16, 8), pady=14)
+
+        # ── Vertical divider ─────────────────────────────────────────────────
+        tk.Frame(header_frame, bg=HDR_ACC, width=2).pack(
+            side='left', fill='y', pady=14, padx=4)
+
+        # ── Title block (center-left) ─────────────────────────────────────────
+        title_block = tk.Frame(header_frame, bg=HDR_BG)
+        title_block.pack(side='left', padx=14, pady=8)
+
+        tk.Label(title_block, text="AIT CMMS",
+                 bg=HDR_BG, fg=GOLD,
+                 font=('Segoe UI', 22, 'bold')).pack(anchor='w')
+        tk.Label(title_block,
+                 text="Computerized Maintenance Management System  ·  v2.3.2",
+                 bg=HDR_BG, fg=TEXT_SEC,
+                 font=('Segoe UI', 10)).pack(anchor='w')
+
+        # ── User / session info (right side) ──────────────────────────────────
+        user_block = tk.Frame(header_frame, bg=HDR_BG)
+        user_block.pack(side='right', padx=20, pady=12)
+
+        user_name  = getattr(self, 'user_name', '') or '—'
+        user_role  = getattr(self, 'current_user_role', '') or ''
+        login_time = datetime.now().strftime('%Y-%m-%d  %H:%M')
+
+        tk.Label(user_block, text=f"  {user_name}  ",
+                 bg=HDR_ACC, fg="#ffffff",
+                 font=('Segoe UI', 11, 'bold'),
+                 padx=8, pady=3).pack(anchor='e')
+        tk.Label(user_block, text=f"{user_role}   |   {login_time}",
+                 bg=HDR_BG, fg=TEXT_SEC,
+                 font=('Segoe UI', 9)).pack(anchor='e', pady=(3, 0))
+
+        # ── Bottom divider below header ───────────────────────────────────────
+        tk.Frame(self.root, bg=HDR_ACC, height=1).pack(side='top', fill='x')
     
     
     
@@ -5770,6 +5895,20 @@ class AITCMMSSystem:
             )
 
             if result:
+                try:
+                    # Export updated PM dates back to CSV before closing
+                    if hasattr(self, 'csv_manager'):
+                        try:
+                            if hasattr(self, 'update_status'):
+                                self.update_status("Saving PM data to CSV…")
+                            self.csv_manager.shutdown_export(
+                                status_cb=lambda m: self.update_status(m) if hasattr(self, 'update_status') else None
+                            )
+                        except Exception as _csv_err:
+                            print(f"WARNING [Shutdown CSV export]: {_csv_err}")
+                except Exception:
+                    pass
+
                 try:
                     # End user session
                     if hasattr(self, 'session_id') and self.session_id:
@@ -7317,6 +7456,9 @@ class AITCMMSSystem:
         except Exception as _skydrol_err:
             print(f"WARNING [Skydrol]: Setup failed (non-fatal): {_skydrol_err}")
 
+        # Initialize CSV manager for PM_MASTER_2026_CLEANED.csv read/write
+        self.csv_manager = CSVManager(self.conn)
+
         # PERFORMANCE FIX: Defer KPI initialization for managers to after UI loads
         # This saves 10-20 seconds at startup
         # KPI system will be initialized in deferred tasks
@@ -7364,6 +7506,20 @@ class AITCMMSSystem:
             # PERFORMANCE FIX: Don't load equipment data at startup
             # It will be loaded on-demand when first accessed
             # This saves 20-30 seconds at startup for large equipment tables
+
+            # Sync PM Master CSV into the database
+            if hasattr(self, 'csv_manager'):
+                try:
+                    def _csv_status(msg):
+                        if hasattr(self, 'update_status'):
+                            self.update_status(msg)
+                    result = self.csv_manager.startup_sync(status_cb=_csv_status)
+                    ins = result.get('inserted', 0)
+                    upd = result.get('updated', 0)
+                    if ins or upd:
+                        print(f"[Startup] CSV sync: {ins} new equipment, {upd} updated")
+                except Exception as _csv_err:
+                    print(f"WARNING [Startup CSV sync]: {_csv_err}")
 
             # Update status
             if hasattr(self, 'update_status'):
@@ -10825,104 +10981,124 @@ class AITCMMSSystem:
     
     
     def create_gui(self):
-        """Create the main GUI interface based on user role"""
-        # Create style
-        style = ttk.Style()
-        style.theme_use('clam')
+        """Create the main GUI interface based on user role."""
+        BG_APP   = "#0d1b2a"
+        BG_PANEL = "#1b2838"
+        BG_CARD  = "#243447"
+        ACCENT   = "#2196f3"
+        GOLD     = "#ffc107"
+        TEXT_PRI = "#e8f1f8"
+        TEXT_SEC = "#90a4b8"
 
-        # Create menu bar (available to all users)
-        menubar = tk.Menu(self.root)
+        # ── Menu bar ─────────────────────────────────────────────────────────
+        menubar = tk.Menu(self.root, bg=BG_CARD, fg=TEXT_PRI,
+                          activebackground=ACCENT, activeforeground="#ffffff",
+                          borderwidth=0, relief='flat')
         self.root.config(menu=menubar)
 
-        # Account menu
-        account_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Account", menu=account_menu)
-        account_menu.add_command(label="Change Password", command=self.open_change_password)
+        account_menu = tk.Menu(menubar, tearoff=0,
+                               bg=BG_CARD, fg=TEXT_PRI,
+                               activebackground=ACCENT, activeforeground="#ffffff")
+        menubar.add_cascade(label="⚙  Account", menu=account_menu)
+        account_menu.add_command(label="Change Password",
+                                 command=self.open_change_password)
         account_menu.add_separator()
         account_menu.add_command(label="Logout", command=self.logout)
 
-        # Toolbar frame at the top (for Manager actions)
+        # ── Manager toolbar ───────────────────────────────────────────────────
         if self.current_user_role == 'Manager':
-            toolbar_frame = ttk.Frame(self.root, relief='raised', borderwidth=1)
-            toolbar_frame.pack(side='top', fill='x', padx=5, pady=5)
+            toolbar_frame = tk.Frame(self.root, bg=BG_CARD, height=46)
+            toolbar_frame.pack(side='top', fill='x')
+            toolbar_frame.pack_propagate(False)
 
-            # Left side - Title
-            ttk.Label(toolbar_frame, text="Manager Tools:",
-                     font=('Arial', 10, 'bold')).pack(side='left', padx=10)
+            tk.Label(toolbar_frame, text="Manager Tools",
+                     bg=BG_CARD, fg=GOLD,
+                     font=('Segoe UI', 10, 'bold')).pack(side='left', padx=(14, 8), pady=8)
 
-            # Right side - Action buttons
-            ttk.Button(toolbar_frame, text="👥 Manage Users",
-                      command=self.open_user_management).pack(side='left', padx=5)
+            # Thin vertical divider
+            tk.Frame(toolbar_frame, bg=ACCENT, width=1).pack(
+                side='left', fill='y', pady=8, padx=4)
 
-            ttk.Button(toolbar_frame, text="🗄️ Database Backup",
-                      command=self.open_backup_manager).pack(side='left', padx=5)
+            for label, cmd in [
+                ("👥  Manage Users",       self.open_user_management),
+                ("🗄  Database Backup",    self.open_backup_manager),
+                ("🔧  Technician View",    self.switch_to_technician_view),
+            ]:
+                btn = tk.Button(toolbar_frame, text=label, command=cmd,
+                                bg=BG_CARD, fg=TEXT_PRI, activebackground=ACCENT,
+                                activeforeground="#ffffff", relief='flat',
+                                padx=10, pady=4,
+                                font=('Segoe UI', 10), bd=0, cursor='hand2')
+                btn.pack(side='left', padx=4, pady=6)
 
-            ttk.Button(toolbar_frame, text="Switch to Technician View",
-                      command=self.switch_to_technician_view).pack(side='left', padx=5)
+            # Gold accent line at bottom of toolbar
+            tk.Frame(self.root, bg=ACCENT, height=1).pack(side='top', fill='x')
 
-            # Separator
-            ttk.Separator(self.root, orient='horizontal').pack(fill='x', padx=5)
+        # ── Main content area ─────────────────────────────────────────────────
+        main_container = tk.Frame(self.root, bg=BG_APP)
+        main_container.pack(fill='both', expand=True, padx=0, pady=0)
 
-        # Main container with scrollbar for the notebook
-        main_container = ttk.Frame(self.root)
-        main_container.pack(fill='both', expand=True, padx=10, pady=10)
+        self.main_canvas = tk.Canvas(main_container,
+                                     bg=BG_APP, highlightthickness=0, bd=0)
+        scrollbar = ttk.Scrollbar(main_container, orient="vertical",
+                                  command=self.main_canvas.yview)
 
-        # Create canvas and scrollbar
-        self.main_canvas = tk.Canvas(main_container, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=self.main_canvas.yview)
-
-        # Create frame inside canvas to hold the notebook
         self.scrollable_frame = ttk.Frame(self.main_canvas)
-
-        # Configure scrolling - update scroll region when content changes
         self.scrollable_frame.bind(
             "<Configure>",
-            lambda e: self.main_canvas.configure(scrollregion=self.main_canvas.bbox("all"))
+            lambda e: self.main_canvas.configure(
+                scrollregion=self.main_canvas.bbox("all"))
         )
 
-        # Create window in canvas for the scrollable frame
-        self.canvas_window = self.main_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas_window = self.main_canvas.create_window(
+            (0, 0), window=self.scrollable_frame, anchor="nw")
         self.main_canvas.configure(yscrollcommand=scrollbar.set)
 
-        # Make the scrollable frame fill the canvas width
         def _configure_canvas(event):
-            # Set the width of the canvas window to match the canvas width
-            canvas_width = event.width
-            self.main_canvas.itemconfig(self.canvas_window, width=canvas_width)
-
+            self.main_canvas.itemconfig(self.canvas_window, width=event.width)
         self.main_canvas.bind("<Configure>", _configure_canvas)
 
-        # Pack scrollbar and canvas
         scrollbar.pack(side="right", fill="y")
         self.main_canvas.pack(side="left", fill="both", expand=True)
 
-        # Bind mouse wheel scrolling
         def _on_mousewheel(event):
-            self.main_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            self.main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
         self.main_canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
-        # Main notebook for tabs (now inside scrollable frame)
+        # ── Notebook ─────────────────────────────────────────────────────────
         self.notebook = ttk.Notebook(self.scrollable_frame)
-        self.notebook.pack(fill='both', expand=True)
+        self.notebook.pack(fill='both', expand=True, padx=6, pady=(6, 0))
 
-        # Create tabs based on role
         if self.current_user_role == 'Manager':
-            # Manager gets all tabs
             self.create_all_manager_tabs()
         elif self.current_user_role == 'Parts Coordinator':
-            # Parts Coordinator gets PM Completion and MRO Stock tabs only
             self.create_parts_coordinator_tabs()
         else:
-            # Technicians only get CM tab
             self.create_technician_tabs()
 
-        # Status bar with user info
-        status_frame = ttk.Frame(self.root)
+        # ── Status bar ────────────────────────────────────────────────────────
+        status_frame = tk.Frame(self.root, bg="#0a1628", height=28)
         status_frame.pack(side='bottom', fill='x')
+        status_frame.pack_propagate(False)
 
-        self.status_bar = ttk.Label(status_frame, text=f"AIT CMMS Ready - Logged in as: {self.user_name} ({self.current_user_role})",
-                                    relief='sunken')
-        self.status_bar.pack(side='left', fill='x', expand=True)
+        # Left: status text
+        self.status_bar = tk.Label(
+            status_frame,
+            text=f"  Ready  ·  {self.user_name} ({self.current_user_role})",
+            bg="#0a1628", fg=TEXT_SEC,
+            font=('Segoe UI', 9), anchor='w')
+        self.status_bar.pack(side='left', fill='x', expand=True, padx=6)
+
+        # Right: current date/time label
+        self._time_label = tk.Label(
+            status_frame,
+            text=datetime.now().strftime('%A, %d %b %Y'),
+            bg="#0a1628", fg=TEXT_SEC,
+            font=('Segoe UI', 9), anchor='e')
+        self._time_label.pack(side='right', padx=10)
+
+        # Top accent line above status bar
+        tk.Frame(self.root, bg=ACCENT, height=1).pack(side='bottom', fill='x')
 
     def create_all_manager_tabs(self):
         """Create all tabs for manager access"""
@@ -14712,9 +14888,11 @@ class AITCMMSSystem:
         self.refresh_analytics_dashboard()
     
     def update_status(self, message):
-        """Update status bar with message"""
+        """Update status bar with message."""
         if hasattr(self, 'status_bar'):
-            self.status_bar.config(text=f"AIT CMMS - {message}")
+            user_info = f"{self.user_name} ({self.current_user_role})" if self.user_name else ""
+            self.status_bar.config(
+                text=f"  {message}  ·  {user_info}" if user_info else f"  {message}")
             self.root.update_idletasks()
         else:
             print(f"STATUS: {message}")
