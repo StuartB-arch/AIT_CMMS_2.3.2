@@ -1,0 +1,646 @@
+"""
+Database Utilities for Multi-User Support
+Provides connection pooling, optimistic concurrency control, and transaction management
+"""
+
+import psycopg2
+from psycopg2 import pool, extras
+from contextlib import contextmanager
+from datetime import datetime
+import threading
+import hashlib
+import time
+
+
+class DatabaseConnectionPool:
+    """Manages PostgreSQL connection pool for concurrent users"""
+
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls):
+        """Singleton pattern to ensure only one pool exists"""
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __init__(self):
+        """Initialize connection pool if not already initialized"""
+        if not hasattr(self, 'pool'):
+            self.pool = None
+            self.config = None
+            self.keepalive_thread = None
+            self.keepalive_stop = threading.Event()
+            self.keepalive_interval = 20  # 20 seconds (very aggressive for NEON free tier)
+            self.connection_max_age = 240  # 4 minutes - force recreation before NEON timeout
+            self.connection_created_times = {}  # Track when each connection was created
+            self._connection_lock = threading.Lock()  # Lock for connection tracking
+
+    def initialize(self, db_config, min_conn=2, max_conn=10):
+        """
+        Initialize the connection pool with keepalive settings
+
+        Args:
+            db_config: Dictionary with connection parameters
+            min_conn: Minimum number of connections to maintain
+            max_conn: Maximum number of connections allowed
+        """
+        if self.pool is None:
+            self.config = db_config
+            self.pool = psycopg2.pool.ThreadedConnectionPool(
+                min_conn,
+                max_conn,
+                host=db_config['host'],
+                port=db_config['port'],
+                database=db_config['database'],
+                user=db_config['user'],
+                password=db_config['password'],
+                sslmode=db_config.get('sslmode', 'require'),
+                # TCP Keepalive settings to prevent connection timeouts (AGGRESSIVE for NEON)
+                keepalives=1,              # Enable TCP keepalive
+                keepalives_idle=10,        # Start keepalive after 10 seconds of idle (more aggressive)
+                keepalives_interval=5,     # Send keepalive every 5 seconds (more frequent)
+                keepalives_count=3,        # Close connection after 3 failed keepalives
+                # Connection timeout settings
+                # PERFORMANCE FIX: Increased from 10s to 30s for NEON cold starts
+                connect_timeout=30         # 30 second connection timeout (NEON free tier can be slow to wake)
+            )
+            print(f"Connection pool initialized: {min_conn}-{max_conn} connections with keepalive enabled")
+
+            # Start keepalive thread to prevent NEON free tier from suspending
+            self._start_keepalive_thread()
+
+    def get_connection(self, max_retries=3):
+        """Get a connection from the pool with validation and retry logic"""
+        if self.pool is None:
+            raise Exception("Connection pool not initialized. Call initialize() first.")
+
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                conn = self.pool.getconn()
+                conn_id = id(conn)
+
+                # Check if connection is too old and needs replacement
+                with self._connection_lock:
+                    created_time = self.connection_created_times.get(conn_id)
+                    if created_time:
+                        age = time.time() - created_time
+                        if age > self.connection_max_age:
+                            print(f"Connection {conn_id} is {age:.1f}s old (max: {self.connection_max_age}s), replacing...")
+                            try:
+                                conn.close()
+                                del self.connection_created_times[conn_id]
+                            except:
+                                pass
+                            # Get a new connection on next iteration
+                            if attempt < max_retries - 1:
+                                continue
+                            else:
+                                raise Exception("Connection too old, failed to get replacement")
+
+                # Validate connection is still alive before returning it
+                try:
+                    # Quick test query to check if connection is valid
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT 1")
+                    cursor.fetchone()
+                    cursor.close()
+                    # End the transaction created by SELECT query
+                    conn.commit()
+
+                    # Track connection creation time if new
+                    with self._connection_lock:
+                        if conn_id not in self.connection_created_times:
+                            self.connection_created_times[conn_id] = time.time()
+
+                    return conn
+                except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+                    # Connection is dead, close it and get a new one
+                    print(f"Connection validation failed (attempt {attempt + 1}/{max_retries}): {e}")
+                    with self._connection_lock:
+                        if conn_id in self.connection_created_times:
+                            del self.connection_created_times[conn_id]
+                    try:
+                        conn.close()
+                    except:
+                        pass
+                    last_error = e
+
+                    # Wait before retry with exponential backoff
+                    if attempt < max_retries - 1:
+                        wait_time = 0.5 * (2 ** attempt)  # 0.5s, 1s, 2s
+                        time.sleep(wait_time)
+
+            except Exception as e:
+                print(f"Error getting connection (attempt {attempt + 1}/{max_retries}): {e}")
+                last_error = e
+                if attempt < max_retries - 1:
+                    wait_time = 0.5 * (2 ** attempt)
+                    time.sleep(wait_time)
+
+        raise Exception(f"Failed to get valid database connection after {max_retries} attempts: {last_error}")
+
+    def return_connection(self, conn):
+        """Return a connection to the pool"""
+        if self.pool:
+            self.pool.putconn(conn)
+
+    def _keepalive_worker(self):
+        """
+        Background thread that keeps ALL pooled connections alive for NEON free tier.
+        This cycles through available connections in the pool to keep them active.
+        """
+        print(f"Keepalive thread started (checking every {self.keepalive_interval}s to prevent NEON suspension)")
+        print(f"Connection max age set to {self.connection_max_age}s - connections will be recreated before timeout")
+
+        while not self.keepalive_stop.is_set():
+            # Wait for the interval or until stop is signaled
+            if self.keepalive_stop.wait(timeout=self.keepalive_interval):
+                break
+
+            # Ping all available connections in the pool
+            connections_pinged = 0
+            connections_failed = 0
+            connections_to_check = []
+
+            # Get multiple connections from the pool (up to minconn to avoid exhausting pool)
+            # We'll get and ping them, then return them
+            try:
+                # Try to get up to min_conn connections to keep them alive
+                # Don't get too many to avoid blocking the application
+                max_to_ping = 5  # Ping up to 5 connections per cycle
+
+                for i in range(max_to_ping):
+                    try:
+                        conn = self.pool.getconn()
+                        if conn:
+                            connections_to_check.append(conn)
+                    except:
+                        # No more available connections, that's OK
+                        break
+
+                # Now ping each connection
+                for conn in connections_to_check:
+                    try:
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT 1")
+                        cursor.fetchone()
+                        cursor.close()
+                        conn.commit()
+                        connections_pinged += 1
+                    except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+                        # Connection is dead, close it
+                        connections_failed += 1
+                        conn_id = id(conn)
+                        print(f"⚠ Keepalive found dead connection {conn_id}: {e}")
+                        with self._connection_lock:
+                            if conn_id in self.connection_created_times:
+                                del self.connection_created_times[conn_id]
+                        try:
+                            conn.close()
+                        except:
+                            pass
+                    except Exception as e:
+                        connections_failed += 1
+                        print(f"⚠ Keepalive ping error: {e}")
+
+                # Return all connections to pool (except failed ones which we closed)
+                for conn in connections_to_check:
+                    if not conn.closed:
+                        self.pool.putconn(conn)
+
+                if connections_pinged > 0:
+                    status = f"✓ Keepalive: pinged {connections_pinged} connection(s)"
+                    if connections_failed > 0:
+                        status += f", {connections_failed} failed and replaced"
+                    print(status)
+                elif connections_failed > 0:
+                    print(f"⚠ Keepalive: {connections_failed} connection(s) failed, will be replaced on next use")
+
+            except Exception as e:
+                print(f"✗ Keepalive cycle error: {e}")
+
+        print("Keepalive thread stopped")
+
+    def _start_keepalive_thread(self):
+        """Start the keepalive background thread"""
+        if self.keepalive_thread is None or not self.keepalive_thread.is_alive():
+            self.keepalive_stop.clear()
+            self.keepalive_thread = threading.Thread(
+                target=self._keepalive_worker,
+                daemon=True,
+                name="DBPoolKeepalive"
+            )
+            self.keepalive_thread.start()
+
+    def _stop_keepalive_thread(self):
+        """Stop the keepalive background thread"""
+        if self.keepalive_thread and self.keepalive_thread.is_alive():
+            self.keepalive_stop.set()
+            self.keepalive_thread.join(timeout=5)
+
+    def close_all(self):
+        """Close all connections in the pool"""
+        # Stop keepalive thread first
+        self._stop_keepalive_thread()
+
+        if self.pool:
+            self.pool.closeall()
+            self.pool = None
+            with self._connection_lock:
+                self.connection_created_times.clear()
+            print("Connection pool closed")
+
+    @contextmanager
+    def get_cursor(self, commit=True):
+        """
+        Context manager for database operations with automatic retry on connection failure
+
+        Args:
+            commit: Whether to commit automatically on success
+
+        Yields:
+            cursor: Database cursor
+
+        Example:
+            with pool.get_cursor() as cursor:
+                cursor.execute("SELECT * FROM equipment")
+                data = cursor.fetchall()
+        """
+        conn = self.get_connection()  # This now validates the connection
+        cursor = None
+        try:
+            cursor = conn.cursor(cursor_factory=extras.RealDictCursor)
+            yield cursor
+            if commit:
+                conn.commit()
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+            # Connection lost during operation - close bad connection
+            print(f"Connection error during operation: {e}")
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            try:
+                conn.rollback()
+            except:
+                pass
+            # Don't return bad connection to pool, close it
+            try:
+                conn.close()
+            except:
+                pass
+            raise Exception(f"Database connection lost: {str(e)}. Please retry the operation.")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except:
+                pass
+            raise e
+        finally:
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
+            # Only return connection if it wasn't closed due to error
+            if conn and not conn.closed:
+                self.return_connection(conn)
+
+
+class OptimisticConcurrencyControl:
+    """Handles optimistic locking for concurrent updates"""
+
+    @staticmethod
+    def check_version(cursor, table, record_id, expected_version, id_column='id'):
+        """
+        Check if the record version matches expected version
+
+        Args:
+            cursor: Database cursor
+            table: Table name
+            record_id: Record ID
+            expected_version: Expected version number
+            id_column: Name of the ID column
+
+        Returns:
+            tuple: (success: bool, current_version: int, message: str)
+        """
+        cursor.execute(
+            f"SELECT version FROM {table} WHERE {id_column} = %s FOR UPDATE",
+            (record_id,)
+        )
+        result = cursor.fetchone()
+
+        if not result:
+            return False, None, f"Record not found in {table}"
+
+        current_version = result[0] if isinstance(result, tuple) else result['version']
+
+        if current_version != expected_version:
+            return False, current_version, (
+                f"Conflict detected: Record was modified by another user. "
+                f"Expected version {expected_version}, found {current_version}."
+            )
+
+        return True, current_version, "Version check passed"
+
+    @staticmethod
+    def increment_version(cursor, table, record_id, id_column='id'):
+        """
+        Increment the version number of a record
+
+        Args:
+            cursor: Database cursor
+            table: Table name
+            record_id: Record ID
+            id_column: Name of the ID column
+        """
+        cursor.execute(
+            f"""
+            UPDATE {table}
+            SET version = version + 1,
+                updated_date = CURRENT_TIMESTAMP
+            WHERE {id_column} = %s
+            """,
+            (record_id,)
+        )
+
+
+class AuditLogger:
+    """Logs all database changes for audit trail"""
+
+    @staticmethod
+    def log(cursor, user_name, action, table_name, record_id, old_values=None, new_values=None, notes=None):
+        """
+        Log a database action
+
+        Args:
+            cursor: Database cursor
+            user_name: Name of user performing action
+            action: Action type (INSERT, UPDATE, DELETE, etc.)
+            table_name: Table being modified
+            record_id: ID of record being modified
+            old_values: Dictionary of old values (for UPDATE)
+            new_values: Dictionary of new values (for INSERT/UPDATE)
+            notes: Additional notes
+        """
+        cursor.execute(
+            """
+            INSERT INTO audit_log
+            (user_name, action, table_name, record_id, old_values, new_values, notes, action_timestamp)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            """,
+            (user_name, action, table_name, record_id, str(old_values), str(new_values), notes)
+        )
+
+
+class UserManager:
+    """Manages user authentication and sessions"""
+
+    @staticmethod
+    def hash_password(password):
+        """Hash a password using SHA-256"""
+        return hashlib.sha256(password.encode()).hexdigest()
+
+    @staticmethod
+    def verify_password(password, hashed_password):
+        """Verify a password against its hash"""
+        return UserManager.hash_password(password) == hashed_password
+
+    @staticmethod
+    def authenticate(cursor, username, password):
+        """
+        Authenticate a user
+
+        Args:
+            cursor: Database cursor
+            username: Username
+            password: Password (plain text)
+
+        Returns:
+            dict: User info if authenticated, None otherwise
+        """
+        cursor.execute(
+            """
+            SELECT id, username, full_name, role, password_hash, is_active
+            FROM users
+            WHERE username = %s
+            """,
+            (username,)
+        )
+        user = cursor.fetchone()
+
+        if not user:
+            return None
+
+        # Convert to dict if it's a tuple or list (defensive coding)
+        # This handles cases where RealDictCursor might not be working as expected
+        if isinstance(user, (tuple, list)):
+            user = {
+                'id': user[0],
+                'username': user[1],
+                'full_name': user[2],
+                'role': user[3],
+                'password_hash': user[4],
+                'is_active': user[5]
+            }
+
+        # Convert to regular dict if it's a DictRow object
+        elif not isinstance(user, dict):
+            user = dict(user)
+
+        if not user['is_active']:
+            return None
+
+        if not UserManager.verify_password(password, user['password_hash']):
+            return None
+
+        # Don't return password hash
+        del user['password_hash']
+        return user
+
+    @staticmethod
+    def change_password(cursor, username, current_password, new_password):
+        """
+        Change user's password
+
+        Args:
+            cursor: Database cursor
+            username: Username
+            current_password: Current password (plain text) for verification
+            new_password: New password (plain text) to set
+
+        Returns:
+            tuple: (success: bool, message: str)
+        """
+        # First verify the current password
+        cursor.execute(
+            """
+            SELECT id, password_hash, is_active
+            FROM users
+            WHERE username = %s
+            """,
+            (username,)
+        )
+        user = cursor.fetchone()
+
+        if not user:
+            return False, "User not found"
+
+        # Convert to dict if needed
+        if isinstance(user, (tuple, list)):
+            user = {
+                'id': user[0],
+                'password_hash': user[1],
+                'is_active': user[2]
+            }
+        elif not isinstance(user, dict):
+            user = dict(user)
+
+        if not user['is_active']:
+            return False, "Account is not active"
+
+        # Verify current password
+        if not UserManager.verify_password(current_password, user['password_hash']):
+            return False, "Current password is incorrect"
+
+        # Hash new password
+        new_password_hash = UserManager.hash_password(new_password)
+
+        # Update password in database
+        cursor.execute(
+            """
+            UPDATE users
+            SET password_hash = %s,
+                updated_date = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (new_password_hash, user['id'])
+        )
+
+        return True, "Password changed successfully"
+
+    @staticmethod
+    def create_session(cursor, user_id, username):
+        """
+        Create a new user session
+
+        Args:
+            cursor: Database cursor
+            user_id: User ID
+            username: Username
+
+        Returns:
+            int: Session ID
+        """
+        cursor.execute(
+            """
+            INSERT INTO user_sessions
+            (user_id, username, login_time, last_activity, is_active)
+            VALUES (%s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, TRUE)
+            RETURNING id
+            """,
+            (user_id, username)
+        )
+        result = cursor.fetchone()
+        session_id = result['id'] if isinstance(result, dict) else result[0]
+        return session_id
+
+    @staticmethod
+    def update_session_activity(cursor, session_id):
+        """Update session last activity time"""
+        cursor.execute(
+            """
+            UPDATE user_sessions
+            SET last_activity = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (session_id,)
+        )
+
+    @staticmethod
+    def end_session(cursor, session_id):
+        """End a user session"""
+        cursor.execute(
+            """
+            UPDATE user_sessions
+            SET logout_time = CURRENT_TIMESTAMP, is_active = FALSE
+            WHERE id = %s
+            """,
+            (session_id,)
+        )
+
+    @staticmethod
+    def get_active_sessions(cursor):
+        """Get all active sessions"""
+        cursor.execute(
+            """
+            SELECT s.id, s.user_id, s.username, u.full_name, u.role,
+                   s.login_time, s.last_activity
+            FROM user_sessions s
+            JOIN users u ON s.user_id = u.id
+            WHERE s.is_active = TRUE
+            ORDER BY s.login_time DESC
+            """
+        )
+        return cursor.fetchall()
+
+
+class TransactionManager:
+    """Manages database transactions with retry logic"""
+
+    @staticmethod
+    @contextmanager
+    def transaction(pool, max_retries=3):
+        """
+        Context manager for transactions with retry logic
+
+        Args:
+            pool: DatabaseConnectionPool instance
+            max_retries: Maximum number of retry attempts for deadlocks
+
+        Yields:
+            cursor: Database cursor
+        """
+        conn = None
+        cursor = None
+        retries = 0
+
+        while retries < max_retries:
+            try:
+                conn = pool.get_connection()
+                cursor = conn.cursor(cursor_factory=extras.DictCursor)
+
+                yield cursor
+
+                conn.commit()
+                break
+
+            except psycopg2.extensions.TransactionRollbackError:
+                # Serialization failure or deadlock - retry
+                if conn:
+                    conn.rollback()
+                retries += 1
+                if retries >= max_retries:
+                    raise Exception(f"Transaction failed after {max_retries} retries")
+                print(f"Deadlock detected, retrying... (attempt {retries}/{max_retries})")
+
+            except Exception as e:
+                if conn:
+                    conn.rollback()
+                raise e
+
+            finally:
+                if cursor:
+                    cursor.close()
+                if conn:
+                    pool.return_connection(conn)
+
+
+# Global pool instance
+db_pool = DatabaseConnectionPool()
