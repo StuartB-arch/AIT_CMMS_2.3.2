@@ -7502,19 +7502,25 @@ class AITCMMSSystem:
                     except Exception as _csv_err:
                         print(f"WARNING [Startup CSV sync]: {_csv_err}")
 
+                # Refresh all equipment-related lists now that the DB is populated
+                _ui(lambda: self.update_status("Loading equipment lists…"))
+                _ui(lambda: self.refresh_equipment_list() if hasattr(self, 'refresh_equipment_list') else None)
+                _ui(lambda: self.load_cannot_find_assets() if hasattr(self, 'load_cannot_find_assets') else None)
+                _ui(lambda: self.load_deactivated_assets() if hasattr(self, 'load_deactivated_assets') else None)
+                _ui(lambda: self.load_missing_parts_list() if hasattr(self, 'load_missing_parts_list') else None)
+
                 # 1b. MRO CSV batch upsert
                 if hasattr(self, 'mro_manager') and hasattr(self.mro_manager, 'mro_csv'):
                     try:
                         _ui(lambda: self.update_status("Syncing MRO Stock CSV…"))
                         self.mro_manager.mro_csv.startup_sync()
+                        # Refresh MRO list after sync
+                        _ui(lambda: self.mro_manager.refresh_mro_list()
+                            if hasattr(self.mro_manager, 'refresh_mro_list') else None)
                     except Exception as _mro_err:
                         print(f"WARNING [Startup MRO CSV sync]: {_mro_err}")
 
-                # 2. Check if DB is empty and offer restore (must run on main thread)
-                _ui(lambda: self.update_status("Checking database…"))
-                _ui(self.check_empty_database_and_offer_restore)
-
-                # 3. Cannot-Find retroactive fix
+                # 2. Cannot-Find retroactive fix
                 try:
                     updated = self.fix_cannot_find_schedules_retroactive(silent=True)
                     if updated:
