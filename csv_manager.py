@@ -399,3 +399,88 @@ class CSVManager:
         except Exception as exc:
             print(f"[CSVManager] ERROR updating PM dates for {bfm_no}: {exc}")
             return False
+
+    # ── Single-row live sync ──────────────────────────────────────────────────
+
+    def sync_equipment_row(self, bfm_no: str) -> bool:
+        """
+        Read one equipment record from the database and update (or insert)
+        its row in the CSV immediately.  Called after any DB commit that
+        changes PM dates, PM flags, or status for a single piece of equipment.
+        Fast: one DB query + one CSV read/write.
+        """
+        if not self.path.exists():
+            return False
+
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                """SELECT sap_material_no, bfm_equipment_no, description,
+                          tool_id_drawing_no, location, master_lin,
+                          monthly_pm, six_month_pm, annual_pm,
+                          last_monthly_pm, last_six_month_pm, last_annual_pm,
+                          next_monthly_pm, next_six_month_pm, next_annual_pm,
+                          status
+                   FROM equipment WHERE bfm_equipment_no = %s""",
+                (bfm_no,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return False
+
+            df = pd.read_csv(self.path, encoding="utf-8-sig", dtype=str)
+            df.columns = df.columns.str.strip()
+
+            mask = df["BFM Equipment No"].str.strip() == bfm_no
+
+            def _apply(idx):
+                df.at[idx, "SAP Material No"]    = _safe_str(row[0])
+                df.at[idx, "Description"]        = _safe_str(row[2])
+                df.at[idx, "Tool ID/Drawing No"] = _safe_str(row[3])
+                df.at[idx, "Location"]           = _safe_str(row[4])
+                df.at[idx, "Master LIN"]         = _safe_str(row[5])
+                df.at[idx, "Monthly PM"]         = _fmt_bool(row[6])
+                df.at[idx, "Six Month PM"]       = _fmt_bool(row[7])
+                df.at[idx, "Annual PM"]          = _fmt_bool(row[8])
+                df.at[idx, "Last Monthly PM"]    = _fmt_date(row[9])
+                df.at[idx, "Last Six Month PM"]  = _fmt_date(row[10])
+                df.at[idx, "Last Annual PM"]     = _fmt_date(row[11])
+                df.at[idx, "Next Monthly PM"]    = _fmt_date(row[12])
+                df.at[idx, "Next Six Month PM"]  = _fmt_date(row[13])
+                df.at[idx, "Next Annual PM"]     = _fmt_date(row[14])
+                df.at[idx, "Status"]             = _safe_str(row[15]) or "Active"
+
+            if mask.any():
+                for idx in df.index[mask]:
+                    _apply(idx)
+            else:
+                # Equipment was added via the app — append a new row
+                next_id = int(df["ID"].max()) + 1 if "ID" in df.columns else len(df) + 1
+                new_row = {
+                    "ID":                next_id,
+                    "SAP Material No":   _safe_str(row[0]),
+                    "BFM Equipment No":  bfm_no,
+                    "Description":       _safe_str(row[2]),
+                    "Tool ID/Drawing No":_safe_str(row[3]),
+                    "Location":          _safe_str(row[4]),
+                    "Master LIN":        _safe_str(row[5]),
+                    "Monthly PM":        _fmt_bool(row[6]),
+                    "Six Month PM":      _fmt_bool(row[7]),
+                    "Annual PM":         _fmt_bool(row[8]),
+                    "Last Monthly PM":   _fmt_date(row[9]),
+                    "Last Six Month PM": _fmt_date(row[10]),
+                    "Last Annual PM":    _fmt_date(row[11]),
+                    "Next Monthly PM":   _fmt_date(row[12]),
+                    "Next Six Month PM": _fmt_date(row[13]),
+                    "Next Annual PM":    _fmt_date(row[14]),
+                    "Status":            _safe_str(row[15]) or "Active",
+                }
+                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+
+            df.to_csv(self.path, index=False, encoding="utf-8-sig")
+            print(f"[CSVManager] Live sync: updated {bfm_no} in CSV")
+            return True
+
+        except Exception as exc:
+            print(f"[CSVManager] ERROR sync_equipment_row({bfm_no}): {exc}")
+            return False

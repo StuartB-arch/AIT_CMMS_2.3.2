@@ -7524,6 +7524,17 @@ class AITCMMSSystem:
 
         threading.Thread(target=_background, daemon=True).start()
 
+    def _csv_sync_async(self, bfm_no: str):
+        """Update one equipment row in the CSV from the DB in a background thread."""
+        import threading
+        def _run():
+            try:
+                if hasattr(self, 'csv_manager'):
+                    self.csv_manager.sync_equipment_row(bfm_no)
+            except Exception as exc:
+                print(f"[CSV live sync] WARNING: {exc}")
+        threading.Thread(target=_run, daemon=True).start()
+
     def _async_update_statistics(self):
         """Update statistics asynchronously without blocking UI"""
         try:
@@ -15002,6 +15013,9 @@ class AITCMMSSystem:
                     # Commit transaction
                     self.conn.commit()
 
+                    # Sync updated PM dates to CSV in the background
+                    self._csv_sync_async(bfm_no)
+
                     # WARNING: VERIFY the completion was saved correctly
                     verification_result = self.verify_pm_completion_saved(cursor, bfm_no, pm_type, technician, completion_date)
                 
@@ -16513,6 +16527,7 @@ class AITCMMSSystem:
                 ''', (bfm_no,))
 
                 self.conn.commit()
+                self._csv_sync_async(bfm_no)
 
                 messagebox.showinfo(
                     "Success",
@@ -16700,6 +16715,7 @@ class AITCMMSSystem:
                 ''', (bfm_no,))
 
                 self.conn.commit()
+                self._csv_sync_async(bfm_no)
 
                 messagebox.showinfo(
                     "Success",
