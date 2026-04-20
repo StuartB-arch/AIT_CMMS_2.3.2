@@ -5,14 +5,15 @@ Add this to your existing AIT_CMMS_REV3.py file
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-#import sqlite3
 from datetime import datetime
 import os
+import threading
 from PIL import Image, ImageTk
 import shutil
 import csv
 import io
 from database_utils import db_pool
+from csv_manager import MROCSVManager
 
 class MROStockManager:
     """MRO (Maintenance, Repair, Operations) Stock Management"""
@@ -25,7 +26,22 @@ class MROStockManager:
         self.parent_app = parent_app
         self.conn = parent_app.conn
         self.root = parent_app.root
+        self.mro_csv = MROCSVManager(self.conn)
         self.init_mro_database()
+
+    def _csv_sync_async(self, part_number: str):
+        """Update one part row in MRO_STOCK.csv in a background thread."""
+        threading.Thread(
+            target=lambda: self.mro_csv.sync_part_row(part_number),
+            daemon=True,
+        ).start()
+
+    def _csv_remove_async(self, part_number: str):
+        """Mark a part Inactive in MRO_STOCK.csv in a background thread."""
+        threading.Thread(
+            target=lambda: self.mro_csv.remove_part_row(part_number),
+            daemon=True,
+        ).start()
         
     def init_mro_database(self):
         """Initialize MRO inventory table"""
@@ -559,6 +575,7 @@ class MROStockManager:
                     ))
 
                 messagebox.showinfo("Success", "Part added successfully!")
+                self._csv_sync_async(fields['part_number'].get().strip())
                 dialog.destroy()
                 self.refresh_mro_list()
 
@@ -886,6 +903,7 @@ class MROStockManager:
                     ))
 
                 messagebox.showinfo("Success", "Part updated successfully!")
+                self._csv_sync_async(part_number)
                 dialog.destroy()
                 self.refresh_mro_list()
 
@@ -951,6 +969,7 @@ class MROStockManager:
                         (part_number,)
                     )
                     self.conn.commit()
+                    self._csv_sync_async(part_number)
                     messagebox.showinfo("Success",
                                       f"Part '{part_name}' marked as INACTIVE.\n\n"
                                       f"Transaction history preserved.")
@@ -971,6 +990,7 @@ class MROStockManager:
                     # Use TRIM() to handle leading/trailing spaces in part numbers
                     cursor.execute('DELETE FROM mro_inventory WHERE TRIM(part_number) = %s', (part_number,))
                     self.conn.commit()
+                    self._csv_remove_async(part_number)
                     messagebox.showinfo("Success", "Part deleted successfully!")
                     self.refresh_mro_list()
                 else:

@@ -5878,7 +5878,7 @@ class AITCMMSSystem:
 
             if result:
                 try:
-                    # Export updated PM dates back to CSV before closing
+                    # Export PM and MRO data back to CSV before closing
                     if hasattr(self, 'csv_manager'):
                         try:
                             if hasattr(self, 'update_status'):
@@ -5887,7 +5887,17 @@ class AITCMMSSystem:
                                 status_cb=lambda m: self.update_status(m) if hasattr(self, 'update_status') else None
                             )
                         except Exception as _csv_err:
-                            print(f"WARNING [Shutdown CSV export]: {_csv_err}")
+                            print(f"WARNING [Shutdown PM CSV export]: {_csv_err}")
+
+                    if hasattr(self, 'mro_manager') and hasattr(self.mro_manager, 'mro_csv'):
+                        try:
+                            if hasattr(self, 'update_status'):
+                                self.update_status("Saving MRO stock to CSV…")
+                            self.mro_manager.mro_csv.shutdown_export(
+                                status_cb=lambda m: self.update_status(m) if hasattr(self, 'update_status') else None
+                            )
+                        except Exception as _mro_err:
+                            print(f"WARNING [Shutdown MRO CSV export]: {_mro_err}")
                 except Exception:
                     pass
 
@@ -7492,15 +7502,23 @@ class AITCMMSSystem:
 
         def _background():
             try:
-                # 1. CSV batch upsert (single round-trip, non-blocking to UI)
+                # 1. PM CSV batch upsert
                 if hasattr(self, 'csv_manager'):
                     try:
                         _ui(lambda: self.update_status("Syncing PM Master CSV…"))
                         result = self.csv_manager.startup_sync()
                         n = result.get('inserted', 0)
-                        print(f"[Startup] CSV sync done: {n} records upserted")
+                        print(f"[Startup] PM CSV sync done: {n} records upserted")
                     except Exception as _csv_err:
                         print(f"WARNING [Startup CSV sync]: {_csv_err}")
+
+                # 1b. MRO CSV batch upsert
+                if hasattr(self, 'mro_manager') and hasattr(self.mro_manager, 'mro_csv'):
+                    try:
+                        _ui(lambda: self.update_status("Syncing MRO Stock CSV…"))
+                        self.mro_manager.mro_csv.startup_sync()
+                    except Exception as _mro_err:
+                        print(f"WARNING [Startup MRO CSV sync]: {_mro_err}")
 
                 # 2. Check if DB is empty and offer restore (must run on main thread)
                 _ui(lambda: self.update_status("Checking database…"))
@@ -7523,6 +7541,17 @@ class AITCMMSSystem:
                 _ui(lambda: self.update_status("Ready"))
 
         threading.Thread(target=_background, daemon=True).start()
+
+    def _csv_sync_async(self, bfm_no: str):
+        """Update one equipment row in the CSV from the DB in a background thread."""
+        import threading
+        def _run():
+            try:
+                if hasattr(self, 'csv_manager'):
+                    self.csv_manager.sync_equipment_row(bfm_no)
+            except Exception as exc:
+                print(f"[CSV live sync] WARNING: {exc}")
+        threading.Thread(target=_run, daemon=True).start()
 
     def _async_update_statistics(self):
         """Update statistics asynchronously without blocking UI"""
@@ -15002,6 +15031,9 @@ class AITCMMSSystem:
                     # Commit transaction
                     self.conn.commit()
 
+                    # Sync updated PM dates to CSV in the background
+                    self._csv_sync_async(bfm_no)
+
                     # WARNING: VERIFY the completion was saved correctly
                     verification_result = self.verify_pm_completion_saved(cursor, bfm_no, pm_type, technician, completion_date)
                 
@@ -16513,6 +16545,7 @@ class AITCMMSSystem:
                 ''', (bfm_no,))
 
                 self.conn.commit()
+                self._csv_sync_async(bfm_no)
 
                 messagebox.showinfo(
                     "Success",
@@ -16700,6 +16733,7 @@ class AITCMMSSystem:
                 ''', (bfm_no,))
 
                 self.conn.commit()
+                self._csv_sync_async(bfm_no)
 
                 messagebox.showinfo(
                     "Success",
