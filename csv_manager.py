@@ -346,14 +346,12 @@ class CSVManager:
                 })
             output_df = pd.DataFrame(output_rows)
 
-        # Backup original before overwriting
+        # Keep exactly one rolling backup (overwrite it each time)
         if self.path.exists():
-            backup = self.path.with_name(
-                f"{self.path.stem}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            )
+            backup = self.path.with_name(f"{self.path.stem}_backup.csv")
             try:
                 shutil.copy2(self.path, backup)
-                print(f"[CSVManager] Backup saved → {backup.name}")
+                print(f"[CSVManager] Backup updated → {backup.name}")
             except Exception as exc:
                 print(f"[CSVManager] WARNING: backup failed: {exc}")
 
@@ -483,4 +481,248 @@ class CSVManager:
 
         except Exception as exc:
             print(f"[CSVManager] ERROR sync_equipment_row({bfm_no}): {exc}")
+            return False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MRO Stock CSV Manager
+# ═══════════════════════════════════════════════════════════════════════════════
+
+MRO_CSV_FILENAME = "MRO_STOCK.csv"
+
+# Columns written to / read from the CSV (binary image data is excluded)
+MRO_COLUMNS = [
+    "part_number", "name", "model_number", "equipment", "engineering_system",
+    "unit_of_measure", "quantity_in_stock", "unit_price", "minimum_stock",
+    "supplier", "location", "rack", "row", "bin",
+    "picture_1_path", "picture_2_path", "notes", "status", "last_updated",
+]
+
+def _mro_csv_path() -> Path:
+    return Path(__file__).parent / MRO_CSV_FILENAME
+
+def _safe_float(val) -> float:
+    try:
+        return float(val) if val not in (None, "", "nan", "None") else 0.0
+    except (ValueError, TypeError):
+        return 0.0
+
+
+class MROCSVManager:
+    """
+    Bidirectional sync between MRO_STOCK.csv and the mro_inventory table.
+
+      startup_sync()     → reads CSV, batch-upserts into mro_inventory
+      shutdown_export()  → reads DB, writes MRO_STOCK.csv (single rolling backup)
+      sync_part_row()    → live single-row update after add / edit
+      remove_part_row()  → marks a row Inactive / deleted in the CSV
+    """
+
+    def __init__(self, conn, csv_path: Optional[str] = None):
+        self.conn = conn
+        self.path = Path(csv_path) if csv_path else _mro_csv_path()
+
+    # ── Startup ──────────────────────────────────────────────────────────────
+
+    def startup_sync(self, status_cb: Optional[Callable] = None) -> dict:
+        """
+        Read MRO_STOCK.csv and batch-upsert into mro_inventory.
+        Uses INSERT … ON CONFLICT (part_number) DO UPDATE so the entire
+        file is sent in one round-trip. Binary image data is NOT touched.
+        """
+        from psycopg2.extras import execute_values
+
+        if not self.path.exists():
+            print(f"[MROCSVManager] No CSV found at {self.path} — skipping startup sync")
+            return {"upserted": 0, "skipped": 0, "errors": 0}
+
+        if status_cb:
+            status_cb("Reading MRO Stock CSV…")
+
+        try:
+            df = pd.read_csv(self.path, encoding="utf-8-sig", dtype=str)
+            df.columns = df.columns.str.strip()
+        except Exception as exc:
+            print(f"[MROCSVManager] ERROR reading CSV: {exc}")
+            return {"upserted": 0, "skipped": 0, "errors": 1}
+
+        rows = []
+        skipped = 0
+        for _, row in df.iterrows():
+            pn = _safe_str(row.get("part_number", ""))
+            if not pn:
+                skipped += 1
+                continue
+            rows.append((
+                pn,
+                _safe_str(row.get("name", "")),
+                _safe_str(row.get("model_number", "")),
+                _safe_str(row.get("equipment", "")),
+                _safe_str(row.get("engineering_system", "")),
+                _safe_str(row.get("unit_of_measure", "")),
+                _safe_float(row.get("quantity_in_stock", 0)),
+                _safe_float(row.get("unit_price", 0)),
+                _safe_float(row.get("minimum_stock", 0)),
+                _safe_str(row.get("supplier", "")),
+                _safe_str(row.get("location", "")),
+                _safe_str(row.get("rack", "")),
+                _safe_str(row.get("row", "")),
+                _safe_str(row.get("bin", "")),
+                _safe_str(row.get("picture_1_path", "")),
+                _safe_str(row.get("picture_2_path", "")),
+                _safe_str(row.get("notes", "")),
+                _safe_str(row.get("status", "Active")) or "Active",
+            ))
+
+        if not rows:
+            return {"upserted": 0, "skipped": skipped, "errors": 0}
+
+        if status_cb:
+            status_cb(f"Syncing {len(rows)} MRO parts to database…")
+
+        try:
+            cursor = self.conn.cursor()
+            execute_values(
+                cursor,
+                """
+                INSERT INTO mro_inventory (
+                    part_number, name, model_number, equipment, engineering_system,
+                    unit_of_measure, quantity_in_stock, unit_price, minimum_stock,
+                    supplier, location, rack, "row", bin,
+                    picture_1_path, picture_2_path, notes, status
+                ) VALUES %s
+                ON CONFLICT (part_number) DO UPDATE SET
+                    name               = EXCLUDED.name,
+                    model_number       = EXCLUDED.model_number,
+                    equipment          = EXCLUDED.equipment,
+                    engineering_system = EXCLUDED.engineering_system,
+                    unit_of_measure    = EXCLUDED.unit_of_measure,
+                    quantity_in_stock  = EXCLUDED.quantity_in_stock,
+                    unit_price         = EXCLUDED.unit_price,
+                    minimum_stock      = EXCLUDED.minimum_stock,
+                    supplier           = EXCLUDED.supplier,
+                    location           = EXCLUDED.location,
+                    rack               = EXCLUDED.rack,
+                    "row"              = EXCLUDED."row",
+                    bin                = EXCLUDED.bin,
+                    picture_1_path     = EXCLUDED.picture_1_path,
+                    picture_2_path     = EXCLUDED.picture_2_path,
+                    notes              = EXCLUDED.notes,
+                    status             = EXCLUDED.status,
+                    last_updated       = CURRENT_TIMESTAMP
+                """,
+                rows,
+                page_size=200,
+            )
+            self.conn.commit()
+            msg = f"MRO sync complete: {len(rows)} parts upserted"
+            print(f"[MROCSVManager] {msg}")
+            if status_cb:
+                status_cb(msg)
+            return {"upserted": len(rows), "skipped": skipped, "errors": 0}
+        except Exception as exc:
+            print(f"[MROCSVManager] ERROR batch upsert: {exc}")
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
+            return {"upserted": 0, "skipped": skipped, "errors": 1}
+
+    # ── Shutdown ─────────────────────────────────────────────────────────────
+
+    def shutdown_export(self, status_cb: Optional[Callable] = None) -> bool:
+        """Export all mro_inventory rows to MRO_STOCK.csv with a single rolling backup."""
+        if status_cb:
+            status_cb("Exporting MRO stock to CSV…")
+
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                f"""SELECT {', '.join(f'"{c}"' if c == 'row' else c
+                                      for c in MRO_COLUMNS)}
+                    FROM mro_inventory ORDER BY part_number"""
+            )
+            rows = cursor.fetchall()
+        except Exception as exc:
+            print(f"[MROCSVManager] ERROR querying DB for export: {exc}")
+            return False
+
+        df = pd.DataFrame(rows, columns=MRO_COLUMNS)
+
+        # Single rolling backup
+        if self.path.exists():
+            backup = self.path.with_name(f"{self.path.stem}_backup.csv")
+            try:
+                shutil.copy2(self.path, backup)
+                print(f"[MROCSVManager] Backup updated → {backup.name}")
+            except Exception as exc:
+                print(f"[MROCSVManager] WARNING: backup failed: {exc}")
+
+        try:
+            df.to_csv(self.path, index=False, encoding="utf-8-sig")
+            msg = f"MRO CSV export complete ({len(df)} parts) → {self.path.name}"
+            print(f"[MROCSVManager] {msg}")
+            if status_cb:
+                status_cb(msg)
+            return True
+        except Exception as exc:
+            print(f"[MROCSVManager] ERROR writing CSV: {exc}")
+            return False
+
+    # ── Live single-row sync ──────────────────────────────────────────────────
+
+    def sync_part_row(self, part_number: str) -> bool:
+        """Read one part from DB and update (or append) its CSV row immediately."""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                f"""SELECT {', '.join(f'"{c}"' if c == 'row' else c
+                                      for c in MRO_COLUMNS)}
+                    FROM mro_inventory WHERE TRIM(part_number) = %s""",
+                (part_number,),
+            )
+            db_row = cursor.fetchone()
+            if not db_row:
+                return False
+
+            row_dict = dict(zip(MRO_COLUMNS, db_row))
+
+            if self.path.exists():
+                df = pd.read_csv(self.path, encoding="utf-8-sig", dtype=str)
+                df.columns = df.columns.str.strip()
+                mask = df["part_number"].str.strip() == part_number
+                if mask.any():
+                    for col in MRO_COLUMNS:
+                        df.loc[mask, col] = "" if row_dict[col] is None else str(row_dict[col])
+                else:
+                    df = pd.concat(
+                        [df, pd.DataFrame([{c: ("" if row_dict[c] is None else str(row_dict[c]))
+                                            for c in MRO_COLUMNS}])],
+                        ignore_index=True,
+                    )
+            else:
+                df = pd.DataFrame([{c: ("" if row_dict[c] is None else str(row_dict[c]))
+                                    for c in MRO_COLUMNS}])
+
+            df.to_csv(self.path, index=False, encoding="utf-8-sig")
+            print(f"[MROCSVManager] Live sync: updated part {part_number}")
+            return True
+        except Exception as exc:
+            print(f"[MROCSVManager] ERROR sync_part_row({part_number}): {exc}")
+            return False
+
+    def remove_part_row(self, part_number: str) -> bool:
+        """Mark a part's Status as 'Inactive' in the CSV (mirrors a soft-delete in DB)."""
+        if not self.path.exists():
+            return False
+        try:
+            df = pd.read_csv(self.path, encoding="utf-8-sig", dtype=str)
+            df.columns = df.columns.str.strip()
+            mask = df["part_number"].str.strip() == part_number
+            if mask.any():
+                df.loc[mask, "status"] = "Inactive"
+                df.to_csv(self.path, index=False, encoding="utf-8-sig")
+            return True
+        except Exception as exc:
+            print(f"[MROCSVManager] ERROR remove_part_row({part_number}): {exc}")
             return False
