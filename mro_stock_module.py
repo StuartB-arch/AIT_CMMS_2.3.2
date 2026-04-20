@@ -26,7 +26,8 @@ class MROStockManager:
         self.parent_app = parent_app
         self.conn = parent_app.conn
         self.root = parent_app.root
-        self.mro_csv = MROCSVManager(self.conn)
+        from site_config import get_mro_csv_path
+        self.mro_csv = MROCSVManager(self.conn, csv_path=get_mro_csv_path())
         self.init_mro_database()
 
     def _csv_sync_async(self, part_number: str):

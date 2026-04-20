@@ -7465,8 +7465,9 @@ class AITCMMSSystem:
         except Exception as _skydrol_err:
             print(f"WARNING [Skydrol]: Setup failed (non-fatal): {_skydrol_err}")
 
-        # Initialize CSV manager for PM_MASTER_2026_CLEANED.csv read/write
-        self.csv_manager = CSVManager(self.conn)
+        # Initialize CSV manager — use configured site CSV if available
+        from site_config import get_pm_csv_path
+        self.csv_manager = CSVManager(self.conn, csv_path=get_pm_csv_path())
 
         # PERFORMANCE FIX: Defer KPI initialization for managers to after UI loads
         # This saves 10-20 seconds at startup
@@ -11011,6 +11012,7 @@ class AITCMMSSystem:
             for label, cmd in [
                 ("👥  Manage Users",    self.open_user_management),
                 ("🗄  Database Backup", self.open_backup_manager),
+                ("⚙  Site Settings",   self.open_site_settings),
             ]:
                 btn = tk.Button(toolbar_frame, text=label, command=cmd,
                                 bg="#dde6f0", fg=TEXT_PRI,
@@ -11307,22 +11309,16 @@ class AITCMMSSystem:
                 command=self.update_equipment_statistics).pack(side='right', padx=5)
         
         
-        ttk.Button(controls_frame, text="Import Equipment CSV", 
-                  command=self.import_equipment_csv).pack(side='left', padx=5)
-        ttk.Button(controls_frame, text="Add Equipment",
-                  command=self.add_equipment_dialog).pack(side='left', padx=5)
-        ttk.Button(controls_frame, text="Edit Equipment",
-                  command=self.edit_equipment_dialog).pack(side='left', padx=5)
-        ttk.Button(controls_frame, text="Delete Equipment",
-                  command=self.delete_equipment_dialog).pack(side='left', padx=5)
-        ttk.Button(controls_frame, text="Refresh List",
-                  command=self.refresh_equipment_list).pack(side='left', padx=5)
-        ttk.Button(controls_frame, text="Export Equipment",
-                  command=self.export_equipment_list).pack(side='left', padx=5)
-        ttk.Button(controls_frame, text="PM Frequency Report",
-                  command=self.export_pm_frequency_report).pack(side='left', padx=5)
-        ttk.Button(controls_frame, text="Bulk Edit PM Cycles",
-                  command=self.bulk_edit_pm_cycles).pack(side='left', padx=5)
+        ttk.Button(controls_frame, text="＋  Add Equipment",
+                  command=self.add_equipment_dialog).pack(side='left', padx=(5, 12))
+
+        ttk.Separator(controls_frame, orient='vertical').pack(side='left', fill='y', pady=4)
+
+        tk.Label(controls_frame,
+                 text="  Right-click any asset for Edit, Delete, Export and more",
+                 fg="#6b7a90", font=('Segoe UI', 9, 'italic'),
+                 bg=controls_frame.cget('style') if False else '#f0f4f8'
+                 ).pack(side='left', padx=10)
         
         
         # Search frame
@@ -11428,6 +11424,7 @@ class AITCMMSSystem:
 
         # Bind double-click event to equipment list
         self.equipment_tree.bind('<Double-1>', self.on_equipment_double_click)
+        self.equipment_tree.bind('<Button-3>', self.show_equipment_context_menu)
 
         # Initialize equipment data on tab creation
         self.refresh_equipment_list()
@@ -21725,7 +21722,146 @@ class AITCMMSSystem:
         except Exception as e:
             print(f"Error refreshing equipment list: {e}")
             messagebox.showerror("Error", f"Failed to refresh equipment list: {str(e)}")
-    
+
+    def show_equipment_context_menu(self, event):
+        """Right-click context menu for the equipment tree."""
+        # Select the row under the cursor first
+        row = self.equipment_tree.identify_row(event.y)
+        if row:
+            self.equipment_tree.selection_set(row)
+        has_sel = bool(self.equipment_tree.selection())
+
+        menu = tk.Menu(self.root, tearoff=0,
+                       bg="#ffffff", fg="#1a2535",
+                       activebackground="#1d6fa4", activeforeground="#ffffff",
+                       font=('Segoe UI', 10), bd=0, relief='flat')
+
+        menu.add_command(label="  ＋  Add Equipment",
+                         command=self.add_equipment_dialog)
+        menu.add_command(label="  ✎  Edit Equipment",
+                         command=self.edit_equipment_dialog,
+                         state='normal' if has_sel else 'disabled')
+        menu.add_command(label="  ✕  Delete Equipment",
+                         command=self.delete_equipment_dialog,
+                         state='normal' if has_sel else 'disabled')
+        menu.add_separator()
+        menu.add_command(label="  ↺  Refresh List",
+                         command=self.refresh_equipment_list)
+        menu.add_separator()
+        menu.add_command(label="  ⬇  Export Equipment List",
+                         command=self.export_equipment_list)
+        menu.add_command(label="  📋  PM Frequency Report",
+                         command=self.export_pm_frequency_report)
+        menu.add_command(label="  ⊞  Bulk Edit PM Cycles",
+                         command=self.bulk_edit_pm_cycles)
+
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def open_site_settings(self):
+        """Open the site configuration dialog."""
+        import site_config
+        from tkinter import filedialog
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Site Settings")
+        dialog.geometry("640x320")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # Centre the dialog
+        dialog.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width()  - 640) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - 320) // 2
+        dialog.geometry(f"+{x}+{y}")
+
+        cfg = site_config.load_config()
+
+        outer = tk.Frame(dialog, bg="#eef2f7")
+        outer.pack(fill='both', expand=True)
+
+        # Header strip
+        tk.Frame(outer, bg="#1e3a5f", height=4).pack(fill='x')
+        hdr = tk.Frame(outer, bg="#1e3a5f")
+        hdr.pack(fill='x')
+        tk.Label(hdr, text="  Site Configuration",
+                 bg="#1e3a5f", fg="#ffffff",
+                 font=('Segoe UI', 13, 'bold')).pack(side='left', pady=10)
+
+        body = tk.Frame(outer, bg="#eef2f7", padx=24, pady=16)
+        body.pack(fill='both', expand=True)
+        body.columnconfigure(1, weight=1)
+
+        def row(r, label, var, browse_cmd=None):
+            tk.Label(body, text=label, bg="#eef2f7",
+                     fg="#1a2535", font=('Segoe UI', 10, 'bold'),
+                     anchor='w').grid(row=r, column=0, sticky='w', pady=8)
+            entry = tk.Entry(body, textvariable=var, width=44,
+                             font=('Segoe UI', 10), relief='flat',
+                             bg="#ffffff", highlightthickness=1,
+                             highlightbackground="#b0bec5")
+            entry.grid(row=r, column=1, sticky='ew', padx=(10, 0))
+            if browse_cmd:
+                tk.Button(body, text="Browse…", command=browse_cmd,
+                          bg="#1d6fa4", fg="#ffffff",
+                          font=('Segoe UI', 9), relief='flat',
+                          padx=10, cursor='hand2').grid(row=r, column=2, padx=(6, 0))
+
+        site_var  = tk.StringVar(value=cfg.get('site_name',    ''))
+        pm_var    = tk.StringVar(value=cfg.get('pm_csv_path',  ''))
+        mro_var   = tk.StringVar(value=cfg.get('mro_csv_path', ''))
+
+        def browse(var):
+            p = filedialog.askopenfilename(
+                parent=dialog, title="Select CSV file",
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+            if p:
+                var.set(p)
+
+        row(0, "Site Name:",          site_var)
+        row(1, "PM Master CSV:",      pm_var,  lambda: browse(pm_var))
+        row(2, "MRO Stock CSV:",      mro_var, lambda: browse(mro_var))
+
+        tk.Label(body, text="Changes to CSV paths take full effect on next startup.",
+                 bg="#eef2f7", fg="#6b7a90",
+                 font=('Segoe UI', 8, 'italic')).grid(
+                     row=3, column=0, columnspan=3, sticky='w', pady=(4, 0))
+
+        # Buttons
+        btn_row = tk.Frame(outer, bg="#eef2f7")
+        btn_row.pack(pady=(0, 16))
+
+        def save():
+            new_cfg = site_config.load_config()
+            new_cfg['site_name']   = site_var.get().strip()
+            if pm_var.get().strip():
+                new_cfg['pm_csv_path']  = pm_var.get().strip()
+            if mro_var.get().strip():
+                new_cfg['mro_csv_path'] = mro_var.get().strip()
+            site_config.save_config(new_cfg)
+            # Update live path so next shutdown export writes to the right file
+            if hasattr(self, 'csv_manager') and pm_var.get().strip():
+                from pathlib import Path
+                self.csv_manager.path = Path(pm_var.get().strip())
+            messagebox.showinfo("Saved",
+                "Site settings saved.\n\n"
+                "Restart the application to load the new CSV file.",
+                parent=dialog)
+            dialog.destroy()
+
+        for txt, cmd, colour in [
+            ("Save",   save,           "#1e7e4a"),
+            ("Cancel", dialog.destroy, "#5a6a7a"),
+        ]:
+            tk.Button(btn_row, text=txt, command=cmd,
+                      bg=colour, fg="#ffffff",
+                      font=('Segoe UI', 10, 'bold'),
+                      relief='flat', padx=20, pady=6,
+                      cursor='hand2').pack(side='left', padx=8)
+
     def filter_equipment_list(self, *args, reset=True):
         """OPTIMIZED: Filter equipment list with pagination - SQL WHERE clauses + LIMIT/OFFSET"""
         try:
