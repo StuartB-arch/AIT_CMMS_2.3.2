@@ -112,7 +112,7 @@ class CSVManager:
         PM dates are merged: whichever is more recent (DB or CSV) wins.
         Returns a result dict: {inserted, updated, skipped, errors}
         """
-        from psycopg2.extras import execute_values
+        from sqlite_compat import execute_values
 
         if not self.path.exists():
             msg = f"PM Master CSV not found: {self.path}"
@@ -188,18 +188,30 @@ class CSVManager:
                     monthly_pm         = EXCLUDED.monthly_pm,
                     six_month_pm       = EXCLUDED.six_month_pm,
                     annual_pm          = EXCLUDED.annual_pm,
-                    last_monthly_pm    = GREATEST(
-                                             equipment.last_monthly_pm::text,
-                                             EXCLUDED.last_monthly_pm::text
-                                         ),
-                    last_six_month_pm  = GREATEST(
-                                             equipment.last_six_month_pm::text,
-                                             EXCLUDED.last_six_month_pm::text
-                                         ),
-                    last_annual_pm     = GREATEST(
-                                             equipment.last_annual_pm::text,
-                                             EXCLUDED.last_annual_pm::text
-                                         ),
+                    last_monthly_pm    = CASE
+                                             WHEN equipment.last_monthly_pm IS NULL
+                                                  THEN EXCLUDED.last_monthly_pm
+                                             WHEN EXCLUDED.last_monthly_pm IS NULL
+                                                  THEN equipment.last_monthly_pm
+                                             WHEN equipment.last_monthly_pm > EXCLUDED.last_monthly_pm
+                                                  THEN equipment.last_monthly_pm
+                                             ELSE EXCLUDED.last_monthly_pm END,
+                    last_six_month_pm  = CASE
+                                             WHEN equipment.last_six_month_pm IS NULL
+                                                  THEN EXCLUDED.last_six_month_pm
+                                             WHEN EXCLUDED.last_six_month_pm IS NULL
+                                                  THEN equipment.last_six_month_pm
+                                             WHEN equipment.last_six_month_pm > EXCLUDED.last_six_month_pm
+                                                  THEN equipment.last_six_month_pm
+                                             ELSE EXCLUDED.last_six_month_pm END,
+                    last_annual_pm     = CASE
+                                             WHEN equipment.last_annual_pm IS NULL
+                                                  THEN EXCLUDED.last_annual_pm
+                                             WHEN EXCLUDED.last_annual_pm IS NULL
+                                                  THEN equipment.last_annual_pm
+                                             WHEN equipment.last_annual_pm > EXCLUDED.last_annual_pm
+                                                  THEN equipment.last_annual_pm
+                                             ELSE EXCLUDED.last_annual_pm END,
                     next_monthly_pm    = EXCLUDED.next_monthly_pm,
                     next_six_month_pm  = EXCLUDED.next_six_month_pm,
                     next_annual_pm     = EXCLUDED.next_annual_pm,
@@ -210,9 +222,6 @@ class CSVManager:
                 page_size=500,
             )
 
-            # Count what actually happened
-            cursor.execute("SELECT xmax = 0 AS inserted, COUNT(*) FROM equipment GROUP BY xmax = 0")
-            # Simpler: just report totals
             self.conn.commit()
 
             msg = f"CSV sync complete: {len(rows)} records upserted, {skipped} skipped"
@@ -530,7 +539,7 @@ class MROCSVManager:
         Uses INSERT … ON CONFLICT (part_number) DO UPDATE so the entire
         file is sent in one round-trip. Binary image data is NOT touched.
         """
-        from psycopg2.extras import execute_values
+        from sqlite_compat import execute_values
 
         if not self.path.exists():
             print(f"[MROCSVManager] No CSV found at {self.path} — skipping startup sync")

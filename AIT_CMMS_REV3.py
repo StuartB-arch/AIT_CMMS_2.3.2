@@ -17,8 +17,6 @@ import shutil
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import pandas as pd
-import psycopg2
-from psycopg2 import sql, extras
 from datetime import datetime, timedelta
 import json
 import os
@@ -210,13 +208,14 @@ class CompletionRecordRepository:
 
         # Fallback to individual query if cache not loaded
         cursor = self.conn.cursor()
+        cutoff = (datetime.today() - timedelta(days=days)).strftime("%Y-%m-%d")
         cursor.execute('''
             SELECT bfm_equipment_no, pm_type, completion_date, technician_name
             FROM pm_completions
             WHERE bfm_equipment_no = %s
-            AND completion_date::DATE >= CURRENT_DATE - INTERVAL '%s days'
+            AND completion_date >= %s
             ORDER BY completion_date DESC
-        ''', (bfm_no, days))
+        ''', (bfm_no, cutoff))
 
         completions = []
         for row in cursor.fetchall():
@@ -249,12 +248,13 @@ class CompletionRecordRepository:
         """Load ALL completion records for ALL equipment in one query - MASSIVE PERFORMANCE BOOST"""
         print(f"DEBUG: Bulk loading completion records...")
         cursor = self.conn.cursor()
+        cutoff = (datetime.today() - timedelta(days=days)).strftime("%Y-%m-%d")
         cursor.execute('''
             SELECT bfm_equipment_no, pm_type, completion_date, technician_name
             FROM pm_completions
-            WHERE completion_date::DATE >= CURRENT_DATE - INTERVAL '%s days'
+            WHERE completion_date >= %s
             ORDER BY bfm_equipment_no, completion_date DESC
-        ''', (days,))
+        ''', (cutoff,))
 
         # Group completions by equipment
         self._completion_cache = {}
@@ -7397,10 +7397,8 @@ class AITCMMSSystem:
         # This must happen before login dialog because login needs database access
         print("Starting AIT CMMS Application...")
         try:
-            # PERFORMANCE FIX: Reduced from min_conn=2, max_conn=20 to 1-10
-            # Pool will grow as needed, but starts faster with fewer connections
-            db_pool.initialize(self.DB_CONFIG, min_conn=1, max_conn=10)
-            print("Database connection pool initialized successfully")
+            db_pool.initialize()
+            print("SQLite database initialized successfully")
         except Exception as e:
             messagebox.showerror("Database Error",
                 f"Failed to initialize database connection:\n{str(e)}\n\nPlease check your internet connection and try again.")
@@ -8631,7 +8629,7 @@ class AITCMMSSystem:
                 try:
                     if hasattr(self, 'conn') and self.conn and not self.conn.closed:
                         self.conn.rollback()
-                except (psycopg2.InterfaceError, psycopg2.OperationalError):
+                except Exception:
                     pass  # Connection already closed, nothing to rollback
                 messagebox.showerror("Error", f"Failed to save template: {str(e)}")
 
@@ -10098,7 +10096,7 @@ class AITCMMSSystem:
                 cursor.close()
                 self.conn.commit()
                 return  # Connection is good
-        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+        except Exception as e:
             print(f"Connection validation failed: {e}. Refreshing connection...")
         except Exception as e:
             print(f"Unexpected error validating connection: {e}")
@@ -10113,7 +10111,6 @@ class AITCMMSSystem:
                     pass
 
             self.conn = db_pool.get_connection()
-            self.conn.autocommit = False
             print("Connection refreshed successfully")
         except Exception as e:
             print(f"ERROR: Failed to refresh connection: {e}")
@@ -10356,17 +10353,16 @@ class AITCMMSSystem:
             # Don't fail initialization if index creation fails
 
     def init_database(self):
-        """Initialize comprehensive CMMS database with Neon PostgreSQL and connection pooling"""
+        """Initialize comprehensive CMMS database with SQLite"""
         try:
             # Connection pool is already initialized before login
             # Get a connection from the pool for initial setup
             self.conn = db_pool.get_connection()
-            self.conn.autocommit = False  # Manual commit control
             cursor = self.conn.cursor()
 
             print("=" * 60)
-            print("CHECK: Connected to Neon PostgreSQL successfully!")
-            print("CHECK: Connection pool initialized for multi-user support")
+            print("CHECK: Connected to SQLite database successfully!")
+            print("CHECK: Local database initialized for offline use")
             print("=" * 60)
 
             # PERFORMANCE FIX: Check if database is already initialized
