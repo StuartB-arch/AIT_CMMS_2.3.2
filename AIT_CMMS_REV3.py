@@ -9,8 +9,6 @@ from cm_parts_integration import CMPartsIntegration
 from manuals_module import ManualsManager
 from database_utils import db_pool, UserManager, AuditLogger, OptimisticConcurrencyControl, TransactionManager
 from skydrol_pm_task import SkydrolPMTaskManager
-from kpi_database_migration import migrate_kpi_database
-from kpi_manager import KPIManager
 from user_management_ui import UserManagementDialog
 from password_change_ui import show_password_change_dialog
 from backup_ui import BackupUI
@@ -7539,34 +7537,13 @@ class AITCMMSSystem:
             except Exception as e:
                 print(f"Error in Cannot Find schedule migration: {e}")
 
-            # PERFORMANCE FIX: Initialize KPI system for managers asynchronously
-            if self.current_user_role == 'Manager':
-                if hasattr(self, 'update_status'):
-                    self.update_status("Initializing KPI system in background...")
-                # Initialize KPI system asynchronously
-                self.root.after(500, self._async_init_kpi)
-            else:
-                # Final status update
-                if hasattr(self, 'update_status'):
-                    self.update_status("Ready")
+            if hasattr(self, 'update_status'):
+                self.update_status("Ready")
 
         except Exception as e:
             print(f"Error in deferred startup tasks: {e}")
             import traceback
             traceback.print_exc()
-
-    def _async_init_kpi(self):
-        """Initialize KPI system asynchronously for managers"""
-        try:
-            self.init_kpi_system()
-            if hasattr(self, 'update_status'):
-                self.update_status("Ready - Updating statistics in background...")
-            # After KPI init, schedule statistics update
-            self.root.after(500, self._async_update_statistics)
-        except Exception as e:
-            print(f"Error initializing KPI system: {e}")
-            if hasattr(self, 'update_status'):
-                self.update_status("Ready")
 
     def _async_update_statistics(self):
         """Update statistics asynchronously without blocking UI"""
@@ -8344,22 +8321,6 @@ class AITCMMSSystem:
         # Load equipment and templates
         self.load_equipment_for_pm_templates()
         self.load_pm_templates()
-
-    def init_kpi_system(self):
-        """Initialize KPI system - run migration and create manager"""
-        try:
-            # Run KPI database migration
-            print("Initializing KPI system...")
-            migrate_kpi_database()
-
-            # Create KPI manager instance
-            self.kpi_manager = KPIManager(db_pool)
-
-            print("KPI system initialized successfully")
-        except Exception as e:
-            print(f"Error initializing KPI system: {e}")
-            import traceback
-            traceback.print_exc()
 
     def create_custom_pm_template_dialog(self):
         """Dialog to create custom PM template for specific equipment"""
