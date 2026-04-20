@@ -1261,14 +1261,18 @@ class PMSchedulingService:
         if all_bfm_nos:
             placeholders = ','.join(['%s'] * len(all_bfm_nos))
             cursor.execute(f'''
-                SELECT DISTINCT ON (bfm_equipment_no)
-                    bfm_equipment_no, assigned_technician
-                FROM weekly_pm_schedules
-                WHERE bfm_equipment_no IN ({placeholders})
-                AND week_start_date < %s
-                AND assigned_technician IS NOT NULL
-                AND assigned_technician != ''
-                ORDER BY bfm_equipment_no, week_start_date DESC
+                SELECT w.bfm_equipment_no, w.assigned_technician
+                FROM weekly_pm_schedules w
+                INNER JOIN (
+                    SELECT bfm_equipment_no, MAX(week_start_date) AS latest_week
+                    FROM weekly_pm_schedules
+                    WHERE bfm_equipment_no IN ({placeholders})
+                    AND week_start_date < %s
+                    AND assigned_technician IS NOT NULL
+                    AND assigned_technician != ''
+                    GROUP BY bfm_equipment_no
+                ) recent ON w.bfm_equipment_no = recent.bfm_equipment_no
+                         AND w.week_start_date = recent.latest_week
             ''', all_bfm_nos + [week_start_str])
             last_tech_per_bfm = {row[0]: row[1] for row in cursor.fetchall()}
 
