@@ -115,13 +115,14 @@ class CompletionRecordRepository:
 
         # Fallback to individual query if cache not loaded
         cursor = self.conn.cursor()
+        cutoff = (datetime.today() - timedelta(days=days)).strftime("%Y-%m-%d")
         cursor.execute('''
             SELECT bfm_equipment_no, pm_type, completion_date, technician_name
             FROM pm_completions
             WHERE bfm_equipment_no = %s
-            AND completion_date::DATE >= CURRENT_DATE - INTERVAL '%s days'
+            AND completion_date >= %s
             ORDER BY completion_date DESC
-        ''', (bfm_no, days))
+        ''', (bfm_no, cutoff))
 
         completions = []
         for row in cursor.fetchall():
@@ -152,12 +153,13 @@ class CompletionRecordRepository:
         """Load ALL completion records for ALL equipment in one query - MASSIVE PERFORMANCE BOOST"""
         print(f"DEBUG: Bulk loading completion records...")
         cursor = self.conn.cursor()
+        cutoff = (datetime.today() - timedelta(days=days)).strftime("%Y-%m-%d")
         cursor.execute('''
             SELECT bfm_equipment_no, pm_type, completion_date, technician_name
             FROM pm_completions
-            WHERE completion_date::DATE >= CURRENT_DATE - INTERVAL '%s days'
+            WHERE completion_date >= %s
             ORDER BY bfm_equipment_no, completion_date DESC
-        ''', (days,))
+        ''', (cutoff,))
 
         # Group completions by equipment
         self._completion_cache = {}

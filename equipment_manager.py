@@ -9,7 +9,6 @@ Handles equipment-related operations including:
 
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime
-import psycopg2
 
 
 class EquipmentManager:
