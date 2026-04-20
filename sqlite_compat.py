@@ -125,7 +125,7 @@ class DictRow:
         return key in self._data
 
     def __iter__(self):
-        return iter(self._data)
+        return iter(self._vals)
 
     def keys(self):
         return self._data.keys()
