@@ -80,35 +80,19 @@ def _pg_to_sqlite(sql: str) -> str:
     sql = re.sub(r'\bFOR\s+UPDATE\b', '', sql, flags=re.IGNORECASE)
 
     # information_schema table existence: SELECT EXISTS (SELECT FROM info_schema.tables ...)
+    # SELECT EXISTS (SELECT FROM information_schema.tables ... table_name = 'X' ...)
+    # → SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='X'
     sql = re.sub(
-        r'SELECT\s+EXISTS\s*\(\s*SELECT\s+(?:\S+\s+)?FROM\s+information_schema\.tables'
-        r'\s+WHERE\s+(?:table_schema\s*=\s*\'public\'\s+AND\s+)?'
-        r'(?:AND\s+)?table_name\s*=\s*\'(\w+)\'[^)]*\)',
-        r"(SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='\1') > 0",
-        sql, flags=re.IGNORECASE | re.DOTALL
-    )
-    # Full SELECT EXISTS(...) statement
-    sql = re.sub(
-        r'SELECT\s+EXISTS\s*\(\s*\n?\s*SELECT\s+FROM\s+information_schema\.tables'
-        r'\s+WHERE\s+(?:table_schema\s*=\s*\'public\'\s+AND\s+)?'
-        r'(?:AND\s+)?table_name\s*=\s*\'(\w+)\'[^)]*\)',
+        r"SELECT\s+EXISTS\s*\([^)]*information_schema\.tables[^)]*table_name\s*=\s*'(\w+)'[^)]*\)",
         r"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='\1'",
         sql, flags=re.IGNORECASE | re.DOTALL
     )
     # information_schema.columns column existence check
     sql = re.sub(
         r"SELECT\s+column_name\s+FROM\s+information_schema\.columns\s+"
-        r"WHERE\s+(?:table_schema\s*=\s*'public'\s+AND\s+)?table_name\s*=\s*'(\w+)'\s+"
-        r"AND\s+column_name\s*=\s*'(\w+)'",
+        r"[^;]*?table_name\s*=\s*'(\w+)'[^;]*?column_name\s*=\s*'(\w+)'",
         r"SELECT name FROM pragma_table_info('\1') WHERE name='\2'",
-        sql, flags=re.IGNORECASE
-    )
-    # Alternate order: WHERE table_name='X' AND column_name='Y' (no schema filter)
-    sql = re.sub(
-        r"SELECT\s+column_name\s+FROM\s+information_schema\.columns\s+"
-        r"WHERE\s+table_name\s*=\s*'(\w+)'\s+AND\s+column_name\s*=\s*'(\w+)'",
-        r"SELECT name FROM pragma_table_info('\1') WHERE name='\2'",
-        sql, flags=re.IGNORECASE
+        sql, flags=re.IGNORECASE | re.DOTALL
     )
 
     # %s → ?  (avoid converting %% which is a literal %)
