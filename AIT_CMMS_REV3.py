@@ -7405,19 +7405,11 @@ class AITCMMSSystem:
             self.root.destroy()
             return
 
-        # Initialize users table and create default users BEFORE login
-        try:
-            self.init_users_table_before_login()
-        except Exception as e:
-            messagebox.showerror("Database Error",
-                f"Failed to initialize users table:\n{str(e)}\n\nPlease check your database configuration.")
-            self.root.destroy()
-            return
-
-        # Show login dialog after database pool is ready
-        if not self.show_login_dialog():
-            self.root.destroy()
-            return
+        # Skip login — start directly as Manager
+        self.user_name = "Admin"
+        self.current_user_role = "Manager"
+        self.user_id = 1
+        self.session_id = None
 
         # Ensure window is maximized after login
         self.root.update_idletasks()
