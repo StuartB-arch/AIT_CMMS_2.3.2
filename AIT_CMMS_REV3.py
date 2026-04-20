@@ -7353,7 +7353,7 @@ class AITCMMSSystem:
         self.session_start_time = datetime.now()
         self.session_id = None  # Track user session for multi-user support
         self.user_id = None  # Database user ID
-        self.root.title("")
+        self.root.title("AIT CMMS")
 
         # Apply UI scaling based on screen resolution
         # This is critical for 4K displays to make text/buttons readable
