@@ -5852,21 +5852,10 @@ class AITCMMSSystem:
                  bg=HDR_BG, fg=TEXT_SEC,
                  font=('Segoe UI', 10)).pack(anchor='w')
 
-        # ── User / session info (right side) ──────────────────────────────────
-        user_block = tk.Frame(header_frame, bg=HDR_BG)
-        user_block.pack(side='right', padx=20, pady=14)
-
-        user_name  = getattr(self, 'user_name', '') or '—'
-        user_role  = getattr(self, 'current_user_role', '') or ''
-        login_time = datetime.now().strftime('%Y-%m-%d  %H:%M')
-
-        tk.Label(user_block, text=f"  {user_name}  ",
-                 bg=ACCENT, fg="#ffffff",
-                 font=('Segoe UI', 11, 'bold'),
-                 padx=8, pady=3).pack(anchor='e')
-        tk.Label(user_block, text=f"{user_role}   |   {login_time}",
-                 bg=HDR_BG, fg=TEXT_SEC,
-                 font=('Segoe UI', 9)).pack(anchor='e', pady=(3, 0))
+        # ── AIT CMMS title (right side) ───────────────────────────────────────
+        tk.Label(header_frame, text="AIT CMMS",
+                 bg=HDR_BG, fg=HDR_NAV,
+                 font=('Segoe UI', 22, 'bold')).pack(side='right', padx=24, pady=14)
 
         # ── Light border below header ─────────────────────────────────────────
         tk.Frame(self.root, bg="#d1dce8", height=1).pack(side='top', fill='x')
