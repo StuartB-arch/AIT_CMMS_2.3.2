@@ -5068,38 +5068,35 @@ class AITCMMSSystem:
     
     # Add this method to your class
     def setup_program_colors(self):
-        """Set up the AIT Dark-Pro color scheme for the entire program."""
+        """Set up the AIT Light-Pro color scheme for the entire program."""
 
         # ── Palette ──────────────────────────────────────────────────────────
-        BG_APP      = "#0d1b2a"   # deep navy — main window background
-        BG_PANEL    = "#1b2838"   # panel / frame fill
-        BG_CARD     = "#243447"   # card / label-frame fill
-        BG_INPUT    = "#1a2535"   # entry / combobox fields
-        BG_ROW_ALT  = "#1e2f42"   # treeview alternating row
-        BG_HEADER   = "#0a1628"   # treeview column headers
-        BG_SEL      = "#1a5a96"   # selected row
+        BG_APP      = "#eef2f7"   # soft blue-gray page background
+        BG_PANEL    = "#f5f7fa"   # panel / frame fill
+        BG_CARD     = "#ffffff"   # card / labelframe fill
+        BG_INPUT    = "#ffffff"   # entry / combobox fields
+        BG_HEADER   = "#1e3a5f"   # treeview column headers (navy)
+        BG_SEL      = "#c8dff5"   # selected row (light blue)
 
-        ACCENT      = "#2196f3"   # primary blue
-        ACCENT_HOV  = "#42a5f5"   # blue hover
-        ACCENT_ACT  = "#1565c0"   # blue pressed
-        GOLD        = "#ffc107"   # amber / warning highlight
-        GOLD_HOV    = "#ffca28"
+        ACCENT      = "#1d6fa4"   # primary blue
+        ACCENT_HOV  = "#2980b9"   # blue hover
+        ACCENT_ACT  = "#1a5276"   # blue pressed
 
-        GREEN       = "#26a65b"   # success / complete
-        GREEN_HOV   = "#2ecc71"
-        RED         = "#e53935"   # danger / delete
-        RED_HOV     = "#ef5350"
-        ORANGE      = "#f57c00"   # warning action
+        GREEN       = "#1e8449"   # success / complete
+        GREEN_HOV   = "#239b56"
+        RED         = "#c0392b"   # danger / delete
+        RED_HOV     = "#e74c3c"
+        ORANGE      = "#d35400"   # warning action
+        GOLD        = "#b7770d"   # amber label text
 
-        TEXT_PRI    = "#e8f1f8"   # primary text (near-white)
-        TEXT_SEC    = "#90a4b8"   # secondary / label text
-        TEXT_DIM    = "#546e7a"   # dimmed / placeholder text
+        TEXT_PRI    = "#1a2535"   # near-black primary text
+        TEXT_SEC    = "#4a5568"   # gray secondary text
+        TEXT_DIM    = "#a0aec0"   # dimmed / disabled
 
-        BORDER      = "#2d4057"   # subtle border
+        BORDER      = "#d1dce8"   # subtle border
 
         FONT_SM  = ('Segoe UI', 11)
         FONT_MD  = ('Segoe UI', 12)
-        FONT_LG  = ('Segoe UI', 13)
         FONT_HDR = ('Segoe UI', 13, 'bold')
         FONT_TAB = ('Segoe UI', 12, 'bold')
 
@@ -5108,12 +5105,11 @@ class AITCMMSSystem:
         self.style.theme_use('clam')
         self.root.configure(bg=BG_APP)
 
-        # Store palette on self so other widgets can reference it
         self.colors = {
             'bg_app': BG_APP, 'bg_panel': BG_PANEL, 'bg_card': BG_CARD,
             'bg_input': BG_INPUT, 'accent': ACCENT, 'gold': GOLD,
-            'green': GREEN, 'red': RED, 'text_pri': TEXT_PRI, 'text_sec': TEXT_SEC,
-            'border': BORDER,
+            'green': GREEN, 'red': RED, 'text_pri': TEXT_PRI,
+            'text_sec': TEXT_SEC, 'border': BORDER,
         }
 
         # ── Frames & Labels ───────────────────────────────────────────────────
@@ -5122,94 +5118,87 @@ class AITCMMSSystem:
         self.style.configure("TLabel",
             background=BG_PANEL, foreground=TEXT_PRI, font=FONT_MD)
         self.style.configure("TLabelframe",
-            background=BG_CARD, foreground=GOLD,
-            borderwidth=1, relief="flat")
+            background=BG_CARD, foreground=ACCENT,
+            borderwidth=1, relief="groove")
         self.style.configure("TLabelframe.Label",
-            background=BG_CARD, foreground=GOLD, font=FONT_HDR)
+            background=BG_CARD, foreground=ACCENT, font=FONT_HDR)
 
         # ── Notebook / Tabs ───────────────────────────────────────────────────
         self.style.configure("TNotebook",
             background=BG_APP, borderwidth=0, tabmargins=[2, 4, 0, 0])
         self.style.configure("TNotebook.Tab",
-            background=BG_CARD, foreground=TEXT_SEC,
-            padding=[18, 8], font=FONT_TAB,
-            borderwidth=0)
+            background="#dde6f0", foreground=TEXT_SEC,
+            padding=[18, 8], font=FONT_TAB, borderwidth=0)
         self.style.map("TNotebook.Tab",
-            background=[("selected", ACCENT),   ("active", BG_SEL)],
-            foreground=[("selected", "#ffffff"), ("active", TEXT_PRI)],
+            background=[("selected", ACCENT),    ("active", "#c0d4e8")],
+            foreground=[("selected", "#ffffff"),  ("active", TEXT_PRI)],
             expand=[("selected", [0, 0, 0, 2])])
 
         # ── Treeview ──────────────────────────────────────────────────────────
         self.style.configure("Treeview",
-            background=BG_PANEL, foreground=TEXT_PRI,
-            rowheight=40, fieldbackground=BG_PANEL,
+            background=BG_CARD, foreground=TEXT_PRI,
+            rowheight=40, fieldbackground=BG_CARD,
             font=FONT_MD, borderwidth=0)
         self.style.configure("Treeview.Heading",
-            background=BG_HEADER, foreground=GOLD,
+            background=BG_HEADER, foreground="#ffffff",
             font=FONT_HDR, relief="flat", borderwidth=0)
         self.style.map("Treeview",
             background=[("selected", BG_SEL)],
-            foreground=[("selected", "#ffffff")])
+            foreground=[("selected", TEXT_PRI)])
         self.style.map("Treeview.Heading",
-            background=[("active", BG_SEL)])
+            background=[("active", "#2c4f7a")])
 
         # ── Buttons ───────────────────────────────────────────────────────────
-        # Default / Primary
         self.style.configure("TButton",
             background=ACCENT, foreground="#ffffff",
             padding=(14, 7), relief="flat", font=FONT_MD, borderwidth=0)
         self.style.map("TButton",
             background=[("active", ACCENT_HOV), ("pressed", ACCENT_ACT),
-                        ("disabled", BG_CARD)],
+                        ("disabled", "#d1dce8")],
             foreground=[("disabled", TEXT_DIM)])
 
-        # Accent (gold) – highlighted primary action
         self.style.configure("Accent.TButton",
-            background=GOLD, foreground="#0d1b2a",
+            background=ACCENT, foreground="#ffffff",
             padding=(14, 7), relief="flat", font=FONT_HDR, borderwidth=0)
         self.style.map("Accent.TButton",
-            background=[("active", GOLD_HOV), ("pressed", "#e65100")])
+            background=[("active", ACCENT_HOV), ("pressed", ACCENT_ACT)])
 
-        # Success / green
         self.style.configure("Success.TButton",
             background=GREEN, foreground="#ffffff",
             padding=(14, 7), relief="flat", font=FONT_MD, borderwidth=0)
         self.style.map("Success.TButton",
-            background=[("active", GREEN_HOV), ("pressed", "#1a7a41")])
+            background=[("active", GREEN_HOV), ("pressed", "#1a6b3a")])
 
-        # Danger / red
         self.style.configure("Danger.TButton",
             background=RED, foreground="#ffffff",
             padding=(14, 7), relief="flat", font=FONT_MD, borderwidth=0)
         self.style.map("Danger.TButton",
-            background=[("active", RED_HOV), ("pressed", "#b71c1c")])
+            background=[("active", RED_HOV), ("pressed", "#922b21")])
 
-        # Warning / orange
         self.style.configure("Warning.TButton",
             background=ORANGE, foreground="#ffffff",
             padding=(14, 7), relief="flat", font=FONT_MD, borderwidth=0)
         self.style.map("Warning.TButton",
-            background=[("active", "#ff8f00"), ("pressed", "#e65100")])
+            background=[("active", "#e67e22"), ("pressed", "#b9460e")])
 
-        # Toolbar buttons (flatter, smaller)
         self.style.configure("Toolbar.TButton",
-            background=BG_CARD, foreground=TEXT_PRI,
+            background="#dde6f0", foreground=TEXT_PRI,
             padding=(10, 5), relief="flat", font=FONT_SM, borderwidth=0)
         self.style.map("Toolbar.TButton",
-            background=[("active", BG_SEL), ("pressed", ACCENT_ACT)])
+            background=[("active", "#c0d4e8"), ("pressed", ACCENT_ACT)])
 
         # ── Entry / Combobox ──────────────────────────────────────────────────
         self.style.configure("TEntry",
             fieldbackground=BG_INPUT, foreground=TEXT_PRI,
             insertcolor=TEXT_PRI, borderwidth=1,
-            relief="flat", font=FONT_MD)
+            relief="solid", font=FONT_MD)
         self.style.map("TEntry",
-            fieldbackground=[("focus", "#1e3550")])
+            fieldbackground=[("focus", "#eaf3fb")])
 
         self.style.configure("TCombobox",
             fieldbackground=BG_INPUT, foreground=TEXT_PRI,
             background=BG_CARD, arrowcolor=ACCENT,
-            selectbackground=BG_SEL, selectforeground="#ffffff",
+            selectbackground=BG_SEL, selectforeground=TEXT_PRI,
             font=FONT_MD)
         self.style.map("TCombobox",
             fieldbackground=[("readonly", BG_INPUT)],
@@ -5217,10 +5206,10 @@ class AITCMMSSystem:
 
         # ── Scrollbars ────────────────────────────────────────────────────────
         self.style.configure("Vertical.TScrollbar",
-            background=BG_CARD, troughcolor=BG_APP,
+            background="#c8d6e5", troughcolor=BG_APP,
             borderwidth=0, arrowcolor=ACCENT, gripcount=0)
         self.style.configure("Horizontal.TScrollbar",
-            background=BG_CARD, troughcolor=BG_APP,
+            background="#c8d6e5", troughcolor=BG_APP,
             borderwidth=0, arrowcolor=ACCENT, gripcount=0)
 
         # ── Separator ─────────────────────────────────────────────────────────
@@ -5238,15 +5227,14 @@ class AITCMMSSystem:
 
         # ── Progressbar ───────────────────────────────────────────────────────
         self.style.configure("TProgressbar",
-            background=ACCENT, troughcolor=BG_CARD,
+            background=ACCENT, troughcolor=BORDER,
             borderwidth=0, lightcolor=ACCENT, darkcolor=ACCENT)
 
         # ── Scale ─────────────────────────────────────────────────────────────
         self.style.configure("TScale",
-            background=BG_PANEL, troughcolor=BG_CARD,
+            background=BG_PANEL, troughcolor=BORDER,
             slidercolor=ACCENT)
 
-        # Apply background colour to the root canvas used by the notebook scroller
         try:
             self.main_canvas.configure(background=BG_APP)
             self.scrollable_frame.configure(style="TFrame")
@@ -5799,30 +5787,28 @@ class AITCMMSSystem:
     
     def add_logo_to_main_window(self):
         """Build the branded header bar at the top of the main window."""
-        HDR_BG   = "#0a1628"   # near-black navy
-        HDR_ACC  = "#2196f3"   # blue accent stripe
-        GOLD     = "#ffc107"
-        TEXT_PRI = "#e8f1f8"
-        TEXT_SEC = "#90a4b8"
+        HDR_BG   = "#ffffff"   # white header background
+        HDR_NAV  = "#1e3a5f"   # navy top stripe
+        ACCENT   = "#1d6fa4"   # blue dividers / badge
+        TEXT_PRI = "#1a2535"   # near-black title
+        TEXT_SEC = "#4a5568"   # gray subtitle
 
-        # ── Outer header frame ────────────────────────────────────────────────
-        header_frame = tk.Frame(self.root, bg=HDR_BG, height=80)
+        # ── Navy accent stripe at very top ────────────────────────────────────
+        tk.Frame(self.root, bg=HDR_NAV, height=4).pack(side='top', fill='x')
+
+        # ── Outer header frame (white) ────────────────────────────────────────
+        header_frame = tk.Frame(self.root, bg=HDR_BG, height=72)
         header_frame.pack(side='top', fill='x')
         header_frame.pack_propagate(False)
-
-        # ── Blue accent stripe at very top ────────────────────────────────────
-        accent_stripe = tk.Frame(self.root, bg=HDR_ACC, height=3)
-        accent_stripe.pack(side='top', fill='x')
 
         # ── Logo (left side) ─────────────────────────────────────────────────
         self.logo_image = None
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        logo_candidates = [
+        for lp in [
             os.path.join(script_dir, "img", "ait_logo.png"),
             os.path.join(script_dir, "img", "ait_Logo.png"),
             os.path.join(script_dir, "ait_logo.png"),
-        ]
-        for lp in logo_candidates:
+        ]:
             if os.path.exists(lp):
                 try:
                     from PIL import Image, ImageTk
@@ -5833,25 +5819,23 @@ class AITCMMSSystem:
                     print(f"Logo load error: {_e}")
 
         if self.logo_image:
-            logo_lbl = tk.Label(header_frame, image=self.logo_image,
-                                bg=HDR_BG, bd=0)
-            logo_lbl.pack(side='left', padx=(16, 8), pady=10)
+            tk.Label(header_frame, image=self.logo_image,
+                     bg=HDR_BG, bd=0).pack(side='left', padx=(16, 8), pady=10)
         else:
-            # Fallback text badge when image is missing
-            tk.Label(header_frame, text="AIT", bg=HDR_ACC,
+            tk.Label(header_frame, text="AIT", bg=HDR_NAV,
                      fg="#ffffff", font=('Segoe UI', 20, 'bold'),
                      padx=14, pady=6).pack(side='left', padx=(16, 8), pady=14)
 
         # ── Vertical divider ─────────────────────────────────────────────────
-        tk.Frame(header_frame, bg=HDR_ACC, width=2).pack(
-            side='left', fill='y', pady=14, padx=4)
+        tk.Frame(header_frame, bg="#d1dce8", width=1).pack(
+            side='left', fill='y', pady=12, padx=8)
 
-        # ── Title block (center-left) ─────────────────────────────────────────
+        # ── Title block ───────────────────────────────────────────────────────
         title_block = tk.Frame(header_frame, bg=HDR_BG)
-        title_block.pack(side='left', padx=14, pady=8)
+        title_block.pack(side='left', padx=6, pady=10)
 
         tk.Label(title_block, text="AIT CMMS",
-                 bg=HDR_BG, fg=GOLD,
+                 bg=HDR_BG, fg=HDR_NAV,
                  font=('Segoe UI', 22, 'bold')).pack(anchor='w')
         tk.Label(title_block,
                  text="Computerized Maintenance Management System  ·  v2.3.2",
@@ -5860,22 +5844,22 @@ class AITCMMSSystem:
 
         # ── User / session info (right side) ──────────────────────────────────
         user_block = tk.Frame(header_frame, bg=HDR_BG)
-        user_block.pack(side='right', padx=20, pady=12)
+        user_block.pack(side='right', padx=20, pady=14)
 
         user_name  = getattr(self, 'user_name', '') or '—'
         user_role  = getattr(self, 'current_user_role', '') or ''
         login_time = datetime.now().strftime('%Y-%m-%d  %H:%M')
 
         tk.Label(user_block, text=f"  {user_name}  ",
-                 bg=HDR_ACC, fg="#ffffff",
+                 bg=ACCENT, fg="#ffffff",
                  font=('Segoe UI', 11, 'bold'),
                  padx=8, pady=3).pack(anchor='e')
         tk.Label(user_block, text=f"{user_role}   |   {login_time}",
                  bg=HDR_BG, fg=TEXT_SEC,
                  font=('Segoe UI', 9)).pack(anchor='e', pady=(3, 0))
 
-        # ── Bottom divider below header ───────────────────────────────────────
-        tk.Frame(self.root, bg=HDR_ACC, height=1).pack(side='top', fill='x')
+        # ── Light border below header ─────────────────────────────────────────
+        tk.Frame(self.root, bg="#d1dce8", height=1).pack(side='top', fill='x')
     
     
     
@@ -10938,13 +10922,13 @@ class AITCMMSSystem:
     
     def create_gui(self):
         """Create the main GUI interface based on user role."""
-        BG_APP   = "#0d1b2a"
-        BG_PANEL = "#1b2838"
-        BG_CARD  = "#243447"
-        ACCENT   = "#2196f3"
-        GOLD     = "#ffc107"
-        TEXT_PRI = "#e8f1f8"
-        TEXT_SEC = "#90a4b8"
+        BG_APP   = "#eef2f7"
+        BG_PANEL = "#f5f7fa"
+        BG_CARD  = "#ffffff"
+        ACCENT   = "#1d6fa4"
+        TEXT_PRI = "#1a2535"
+        TEXT_SEC = "#4a5568"
+        BORDER   = "#d1dce8"
 
         # ── Menu bar ─────────────────────────────────────────────────────────
         menubar = tk.Menu(self.root, bg=BG_CARD, fg=TEXT_PRI,
@@ -10963,32 +10947,30 @@ class AITCMMSSystem:
 
         # ── Manager toolbar ───────────────────────────────────────────────────
         if self.current_user_role == 'Manager':
-            toolbar_frame = tk.Frame(self.root, bg=BG_CARD, height=46)
+            toolbar_frame = tk.Frame(self.root, bg="#dde6f0", height=46)
             toolbar_frame.pack(side='top', fill='x')
             toolbar_frame.pack_propagate(False)
 
             tk.Label(toolbar_frame, text="Manager Tools",
-                     bg=BG_CARD, fg=GOLD,
+                     bg="#dde6f0", fg="#1e3a5f",
                      font=('Segoe UI', 10, 'bold')).pack(side='left', padx=(14, 8), pady=8)
 
-            # Thin vertical divider
-            tk.Frame(toolbar_frame, bg=ACCENT, width=1).pack(
+            tk.Frame(toolbar_frame, bg=BORDER, width=1).pack(
                 side='left', fill='y', pady=8, padx=4)
 
             for label, cmd in [
-                ("👥  Manage Users",       self.open_user_management),
-                ("🗄  Database Backup",    self.open_backup_manager),
-                ("🔧  Technician View",    self.switch_to_technician_view),
+                ("👥  Manage Users",    self.open_user_management),
+                ("🗄  Database Backup", self.open_backup_manager),
+                ("🔧  Technician View", self.switch_to_technician_view),
             ]:
                 btn = tk.Button(toolbar_frame, text=label, command=cmd,
-                                bg=BG_CARD, fg=TEXT_PRI, activebackground=ACCENT,
-                                activeforeground="#ffffff", relief='flat',
-                                padx=10, pady=4,
+                                bg="#dde6f0", fg=TEXT_PRI,
+                                activebackground=ACCENT, activeforeground="#ffffff",
+                                relief='flat', padx=10, pady=4,
                                 font=('Segoe UI', 10), bd=0, cursor='hand2')
                 btn.pack(side='left', padx=4, pady=6)
 
-            # Gold accent line at bottom of toolbar
-            tk.Frame(self.root, bg=ACCENT, height=1).pack(side='top', fill='x')
+            tk.Frame(self.root, bg=BORDER, height=1).pack(side='top', fill='x')
 
         # ── Main content area ─────────────────────────────────────────────────
         main_container = tk.Frame(self.root, bg=BG_APP)
@@ -11033,28 +11015,25 @@ class AITCMMSSystem:
             self.create_technician_tabs()
 
         # ── Status bar ────────────────────────────────────────────────────────
-        status_frame = tk.Frame(self.root, bg="#0a1628", height=28)
+        tk.Frame(self.root, bg=BORDER, height=1).pack(side='bottom', fill='x')
+
+        status_frame = tk.Frame(self.root, bg="#dde6f0", height=26)
         status_frame.pack(side='bottom', fill='x')
         status_frame.pack_propagate(False)
 
-        # Left: status text
         self.status_bar = tk.Label(
             status_frame,
             text=f"  Ready  ·  {self.user_name} ({self.current_user_role})",
-            bg="#0a1628", fg=TEXT_SEC,
+            bg="#dde6f0", fg=TEXT_SEC,
             font=('Segoe UI', 9), anchor='w')
         self.status_bar.pack(side='left', fill='x', expand=True, padx=6)
 
-        # Right: current date/time label
         self._time_label = tk.Label(
             status_frame,
             text=datetime.now().strftime('%A, %d %b %Y'),
-            bg="#0a1628", fg=TEXT_SEC,
+            bg="#dde6f0", fg=TEXT_SEC,
             font=('Segoe UI', 9), anchor='e')
         self._time_label.pack(side='right', padx=10)
-
-        # Top accent line above status bar
-        tk.Frame(self.root, bg=ACCENT, height=1).pack(side='bottom', fill='x')
 
     def create_all_manager_tabs(self):
         """Create all tabs for manager access"""
