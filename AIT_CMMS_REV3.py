@@ -5844,10 +5844,41 @@ class AITCMMSSystem:
         title_block = tk.Frame(header_frame, bg=HDR_BG)
         title_block.pack(side='left', padx=6, pady=10)
 
-        tk.Label(title_block,
-                 text="Computerized Maintenance Management System  ·  v2.3.2",
+        subtitle_row = tk.Frame(title_block, bg=HDR_BG)
+        subtitle_row.pack(anchor='w', pady=(2, 0))
+
+        tk.Label(subtitle_row,
+                 text="Computerized Maintenance Management System",
                  bg=HDR_BG, fg=TEXT_SEC,
-                 font=('Segoe UI', 10)).pack(anchor='w')
+                 font=('Segoe UI', 10)).pack(side='left')
+
+        # Thin vertical separator
+        tk.Frame(subtitle_row, bg="#b0bec5", width=1).pack(
+            side='left', fill='y', padx=10, pady=1)
+
+        # Version badge — navy pill
+        tk.Label(subtitle_row, text=" v2.3.2 ",
+                 bg=HDR_NAV, fg="#ffffff",
+                 font=('Segoe UI', 8, 'bold'),
+                 padx=5, pady=2).pack(side='left')
+
+        # Diamond accent spacer
+        tk.Label(subtitle_row, text="  ◆  ",
+                 bg=HDR_BG, fg=ACCENT,
+                 font=('Segoe UI', 7)).pack(side='left')
+
+        # Green LIVE status pill
+        tk.Label(subtitle_row, text=" ● LIVE ",
+                 bg="#1e7e4a", fg="#ffffff",
+                 font=('Segoe UI', 8, 'bold'),
+                 padx=5, pady=2).pack(side='left')
+
+        # Three accent bars — decorative chevron-style finish
+        bar_row = tk.Frame(subtitle_row, bg=HDR_BG)
+        bar_row.pack(side='left', padx=(10, 0))
+        for colour in ("#1e3a5f", "#1d6fa4", "#7ab3d4"):
+            tk.Frame(bar_row, bg=colour, width=4, height=14).pack(
+                side='left', padx=1)
 
         # ── AIT CMMS title (right side) ───────────────────────────────────────
         tk.Label(header_frame, text="AIT CMMS",
