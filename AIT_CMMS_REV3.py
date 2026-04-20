@@ -5840,13 +5840,10 @@ class AITCMMSSystem:
         tk.Frame(header_frame, bg="#d1dce8", width=1).pack(
             side='left', fill='y', pady=12, padx=8)
 
-        # ── Title block ───────────────────────────────────────────────────────
+        # ── Subtitle block ────────────────────────────────────────────────────
         title_block = tk.Frame(header_frame, bg=HDR_BG)
         title_block.pack(side='left', padx=6, pady=10)
 
-        tk.Label(title_block, text="AIT CMMS",
-                 bg=HDR_BG, fg=HDR_NAV,
-                 font=('Segoe UI', 22, 'bold')).pack(anchor='w')
         tk.Label(title_block,
                  text="Computerized Maintenance Management System  ·  v2.3.2",
                  bg=HDR_BG, fg=TEXT_SEC,
