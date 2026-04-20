@@ -5807,6 +5807,7 @@ class AITCMMSSystem:
 
         # ── Logo (left side) ─────────────────────────────────────────────────
         self.logo_image = None
+        self._icon_image = None
         script_dir = os.path.dirname(os.path.abspath(__file__))
         for lp in [
             os.path.join(script_dir, "img", "ait_logo.png"),
@@ -5816,8 +5817,11 @@ class AITCMMSSystem:
             if os.path.exists(lp):
                 try:
                     from PIL import Image, ImageTk
-                    pil_img = Image.open(lp).resize((160, 52), Image.Resampling.LANCZOS)
+                    img_raw = Image.open(lp)
+                    pil_img = img_raw.resize((160, 52), Image.Resampling.LANCZOS)
                     self.logo_image = ImageTk.PhotoImage(pil_img)
+                    icon_img = img_raw.resize((48, 48), Image.Resampling.LANCZOS)
+                    self._icon_image = ImageTk.PhotoImage(icon_img)
                     break
                 except Exception as _e:
                     print(f"Logo load error: {_e}")
@@ -5825,6 +5829,8 @@ class AITCMMSSystem:
         if self.logo_image:
             tk.Label(header_frame, image=self.logo_image,
                      bg=HDR_BG, bd=0).pack(side='left', padx=(16, 8), pady=10)
+            if self._icon_image:
+                self.root.iconphoto(False, self._icon_image)
         else:
             tk.Label(header_frame, text="AIT", bg=HDR_NAV,
                      fg="#ffffff", font=('Segoe UI', 20, 'bold'),
@@ -10988,7 +10994,6 @@ class AITCMMSSystem:
             for label, cmd in [
                 ("👥  Manage Users",    self.open_user_management),
                 ("🗄  Database Backup", self.open_backup_manager),
-                ("🔧  Technician View", self.switch_to_technician_view),
             ]:
                 btn = tk.Button(toolbar_frame, text=label, command=cmd,
                                 bg="#dde6f0", fg=TEXT_PRI,
@@ -11034,12 +11039,7 @@ class AITCMMSSystem:
         self.notebook = ttk.Notebook(self.scrollable_frame)
         self.notebook.pack(fill='both', expand=True, padx=6, pady=(6, 0))
 
-        if self.current_user_role == 'Manager':
-            self.create_all_manager_tabs()
-        elif self.current_user_role == 'Parts Coordinator':
-            self.create_parts_coordinator_tabs()
-        else:
-            self.create_technician_tabs()
+        self.create_all_manager_tabs()
 
         # ── Status bar ────────────────────────────────────────────────────────
         tk.Frame(self.root, bg=BORDER, height=1).pack(side='bottom', fill='x')
@@ -11075,185 +11075,6 @@ class AITCMMSSystem:
         self.mro_manager.create_mro_tab(self.notebook)
         self.manuals_manager.create_manuals_tab(self.notebook)
 
-    def create_technician_tabs(self):
-        """Create limited tabs for technician access"""
-        # Only create CM Management tab for technicians
-        self.create_cm_management_tab()
-
-        # Add read-only MRO Stock tab for technicians
-        self.mro_manager.create_mro_tab(self.notebook, readonly=True)
-
-        # Add a simple info tab explaining their access
-        self.create_technician_info_tab()
-
-    def create_technician_info_tab(self):
-        """Create an info tab for technicians"""
-        info_frame = ttk.Frame(self.notebook)
-        self.notebook.add(info_frame, text="System Info")
-    
-        # Welcome message
-        welcome_frame = ttk.LabelFrame(info_frame, text="Welcome to AIT CMMS", padding=20)
-        welcome_frame.pack(fill='both', expand=True, padx=20, pady=20)
-    
-        welcome_text = f"""
-    Welcome, {self.user_name}!
-
-    You are logged in as a Technician with access to:
-    - Complete Corrective Maintenance (CM) System
-    - View ALL team CMs (everyone's entries)
-    - Create new CMs
-    - Edit existing CMs
-    - Complete CMs
-    - View CM history and status
-    - MRO Stock (Read-Only) - View parts inventory
-
-    Team Collaboration:
-    - You can see CMs created by all technicians
-    - View work assigned to other team members
-    - Complete CMs assigned to you or help with others
-    - Full visibility of maintenance activities
-
-    New Features:
-    - MRO Stock tab: View parts inventory, check stock levels, export reports
-    - Check parts availability before creating work orders
-    - View low stock alerts and usage reports
-
-    For additional system access or questions, please contact your manager.
-
-    System Information:
-    - User: {self.user_name}
-    - Role: {self.current_user_role}
-    - Login Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-    Quick Tips:
-    - Use the CM tab to view all corrective maintenance
-    - Create new CMs when you discover issues
-    - Enter accurate dates when creating CMs
-    - Provide detailed descriptions for better tracking
-    - Update CM status when work is completed
-    - Check MRO Stock for parts availability
-    - Coordinate with team members through CM system
-    """
-    
-        info_label = ttk.Label(welcome_frame, text=welcome_text, 
-                            font=('Arial', 11), justify='left')
-        info_label.pack(anchor='w')
-    
-        # Quick access buttons
-        buttons_frame = ttk.Frame(welcome_frame)
-        buttons_frame.pack(fill='x', pady=20)
-    
-        ttk.Button(buttons_frame, text="Create New CM",
-                command=self.create_cm_dialog).pack(side='left', padx=10)
-        ttk.Button(buttons_frame, text="View My Assigned CMs",
-                command=self.show_my_cms).pack(side='left', padx=10)
-
-    def create_parts_coordinator_tabs(self):
-        """Create limited tabs for parts coordinator access - PM Completion, MRO Stock, and Manuals"""
-        # Parts coordinator gets PM Completion, MRO Stock, and Manuals tabs
-        self.create_pm_completion_tab()
-        self.mro_manager.create_mro_tab(self.notebook)
-        self.manuals_manager.create_manuals_tab(self.notebook)
-
-        # Add an info tab explaining their access
-        self.create_parts_coordinator_info_tab()
-
-    def create_parts_coordinator_info_tab(self):
-        """Create an info tab for parts coordinator"""
-        info_frame = ttk.Frame(self.notebook)
-        self.notebook.add(info_frame, text="System Info")
-
-        # Welcome message
-        welcome_frame = ttk.LabelFrame(info_frame, text="Welcome to AIT CMMS", padding=20)
-        welcome_frame.pack(fill='both', expand=True, padx=20, pady=20)
-
-        welcome_text = f"""
-    Welcome, {self.user_name}!
-
-    You are logged in as a Parts Coordinator with access to:
-    - PM Completion Management
-      • View and edit PM completion records
-      • Track PM work performed by technicians
-      • Manage labor hours and completion dates
-      • Review PM history and statistics
-
-    - MRO Stock Management
-      • View and manage parts inventory
-      • Update stock quantities
-      • Track part usage and costs
-      • Monitor stock levels and reorder points
-      • Add new parts to inventory
-
-    Your Role:
-    - Manage all PM completion entries and data
-    - Oversee MRO stock inventory and parts tracking
-    - All changes you make are automatically saved to the database
-    - Your work ensures accurate maintenance records and inventory control
-
-    For additional system access or questions, please contact your manager.
-
-    System Information:
-    - User: {self.user_name}
-    - Role: {self.current_user_role}
-    - Login Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-    Quick Tips:
-    - Use PM Completion tab to review and manage maintenance records
-    - Use MRO Stock tab to manage parts inventory
-    - All changes are saved immediately to the database
-    - You can change your password using the menu at the top
-    """
-
-        info_label = ttk.Label(welcome_frame, text=welcome_text,
-                            font=('Arial', 11), justify='left')
-        info_label.pack(anchor='w')
-
-    def show_my_cms(self):
-        """Show CMs assigned to current technician"""
-        if self.current_user_role != 'Technician':
-            return
-        
-        try:
-            cursor = self.conn.cursor()
-            cursor.execute('''
-                SELECT cm_number, bfm_equipment_no, description, priority, status, created_date
-                FROM corrective_maintenance 
-                WHERE assigned_technician = %s
-                ORDER BY created_date DESC
-            ''', (self.user_name,))
-        
-            my_cms = cursor.fetchall()
-        
-            # Create dialog to show results
-            dialog = tk.Toplevel(self.root)
-            dialog.title(f"My CMs - {self.user_name}")
-            dialog.geometry("800x400")
-            dialog.transient(self.root)
-            dialog.grab_set()
-        
-            if my_cms:
-                # Create tree to display CMs
-                tree = ttk.Treeview(dialog, columns=('CM#', 'Equipment', 'Description', 'Priority', 'Status', 'Date'), 
-                                show='headings')
-            
-                for col in ('CM#', 'Equipment', 'Description', 'Priority', 'Status', 'Date'):
-                    tree.heading(col, text=col)
-                    tree.column(col, width=120)
-            
-                for cm in my_cms:
-                    cm_number, bfm_no, description, priority, status, created_date = cm
-                    display_desc = (description[:30] + '...') if len(description) > 30 else description
-                    tree.insert('', 'end', values=(cm_number, bfm_no, display_desc, priority, status, created_date))
-            
-                tree.pack(fill='both', expand=True, padx=10, pady=10)
-            else:
-                ttk.Label(dialog, text=f"No CMs assigned to {self.user_name}", 
-                        font=('Arial', 12)).pack(pady=50)
-        
-            ttk.Button(dialog, text="Close", command=dialog.destroy).pack(pady=10)
-        
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to load your CMs: {str(e)}")
 
     def open_user_management(self):
         """Open user management dialog (Manager only)"""
@@ -11330,31 +11151,6 @@ class AITCMMSSystem:
                 # Close the application
                 self.root.destroy()
 
-    def switch_to_technician_view(self):
-        """Switch to technician view for testing (Manager only)"""
-        if self.current_user_role != 'Manager':
-            return
-        
-        result = messagebox.askyesno("Switch View", 
-                                    "Switch to Technician view?\n\n"
-                                    "This will hide all manager functions and only show CM access.\n"
-                                    "You'll need to restart the application to get back to Manager view.")
-    
-        if result:
-            # Temporarily switch role
-            self.current_user_role = 'Technician'
-            self.user_name = 'Test Technician'
-        
-            # Recreate GUI
-            for widget in self.notebook.winfo_children():
-                widget.destroy()
-        
-            self.create_technician_tabs()
-            self.status_bar.config(text=f"AIT CMMS - Logged in as: {self.user_name} ({self.current_user_role})")
-
-    
-   
-    
     def standardize_all_database_dates(self):
         """Standardize all dates in the database to YYYY-MM-DD format"""
         
