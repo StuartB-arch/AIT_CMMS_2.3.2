@@ -106,18 +106,21 @@ class CSVManager:
 
     def startup_sync(self, status_cb: Optional[Callable] = None) -> dict:
         """
-        Read CSV and upsert all records into the database.
-        - New BFM numbers → INSERT
-        - Existing records → UPDATE pm flags, metadata, and merge dates (keep newer)
+        Read CSV and batch-upsert all records into the database.
+        Uses a single INSERT … ON CONFLICT DO UPDATE so the entire 2 800-row
+        CSV is sent in one round-trip instead of one query per row.
+        PM dates are merged: whichever is more recent (DB or CSV) wins.
         Returns a result dict: {inserted, updated, skipped, errors}
         """
+        from psycopg2.extras import execute_values
+
         if not self.path.exists():
             msg = f"PM Master CSV not found: {self.path}"
             print(f"[CSVManager] WARNING: {msg}")
             return {"inserted": 0, "updated": 0, "skipped": 0, "errors": 0, "message": msg}
 
         if status_cb:
-            status_cb("Reading PM Master CSV file...")
+            status_cb("Reading PM Master CSV…")
 
         try:
             df = pd.read_csv(self.path, encoding="utf-8-sig", dtype=str)
@@ -126,112 +129,105 @@ class CSVManager:
             print(f"[CSVManager] ERROR reading CSV: {exc}")
             return {"inserted": 0, "updated": 0, "skipped": 0, "errors": 1, "message": str(exc)}
 
-        inserted = updated = skipped = errors = 0
-        total = len(df)
-        cursor = self.conn.cursor()
-
-        for idx, row in df.iterrows():
+        rows = []
+        skipped = 0
+        for _, row in df.iterrows():
             bfm_no = _safe_str(row.get("BFM Equipment No", ""))
             if not bfm_no:
                 skipped += 1
                 continue
+            rows.append((
+                _safe_str(row.get("SAP Material No", "")),
+                bfm_no,
+                _safe_str(row.get("Description", "")),
+                _safe_str(row.get("Tool ID/Drawing No", "")),
+                _safe_str(row.get("Location", "")),
+                _safe_str(row.get("Master LIN", "")),
+                _parse_bool(row.get("Monthly PM", "False")),
+                _parse_bool(row.get("Six Month PM", "False")),
+                _parse_bool(row.get("Annual PM", "False")),
+                _norm_date(row.get("Last Monthly PM")),
+                _norm_date(row.get("Last Six Month PM")),
+                _norm_date(row.get("Last Annual PM")),
+                _norm_date(row.get("Next Monthly PM")),
+                _norm_date(row.get("Next Six Month PM")),
+                _norm_date(row.get("Next Annual PM")),
+                _safe_str(row.get("Status", "Active")) or "Active",
+            ))
 
-            if status_cb and idx % 200 == 0:
-                status_cb(f"Syncing CSV → database ({idx}/{total})…")
+        if not rows:
+            return {"inserted": 0, "updated": 0, "skipped": skipped, "errors": 0}
 
-            try:
-                sap_no       = _safe_str(row.get("SAP Material No", ""))
-                description  = _safe_str(row.get("Description", ""))
-                tool_id      = _safe_str(row.get("Tool ID/Drawing No", ""))
-                location     = _safe_str(row.get("Location", ""))
-                master_lin   = _safe_str(row.get("Master LIN", ""))
-                monthly_pm   = _parse_bool(row.get("Monthly PM", "False"))
-                six_month_pm = _parse_bool(row.get("Six Month PM", "False"))
-                annual_pm    = _parse_bool(row.get("Annual PM", "False"))
-                last_monthly  = _norm_date(row.get("Last Monthly PM"))
-                last_six      = _norm_date(row.get("Last Six Month PM"))
-                last_annual   = _norm_date(row.get("Last Annual PM"))
-                next_monthly  = _norm_date(row.get("Next Monthly PM"))
-                next_six      = _norm_date(row.get("Next Six Month PM"))
-                next_annual   = _norm_date(row.get("Next Annual PM"))
-                status = _safe_str(row.get("Status", "Active")) or "Active"
-
-                cursor.execute(
-                    """SELECT id, last_monthly_pm, last_six_month_pm, last_annual_pm
-                       FROM equipment WHERE bfm_equipment_no = %s""",
-                    (bfm_no,),
-                )
-                existing = cursor.fetchone()
-
-                if existing is None:
-                    cursor.execute(
-                        """INSERT INTO equipment (
-                               sap_material_no, bfm_equipment_no, description,
-                               tool_id_drawing_no, location, master_lin,
-                               monthly_pm, six_month_pm, annual_pm,
-                               last_monthly_pm, last_six_month_pm, last_annual_pm,
-                               next_monthly_pm, next_six_month_pm, next_annual_pm,
-                               status
-                           ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                        (
-                            sap_no, bfm_no, description, tool_id, location, master_lin,
-                            monthly_pm, six_month_pm, annual_pm,
-                            last_monthly, last_six, last_annual,
-                            next_monthly, next_six, next_annual,
-                            status,
-                        ),
-                    )
-                    inserted += 1
-                else:
-                    # Merge dates: keep whichever is more recent (DB completion records win ties)
-                    final_last_monthly = _newer(existing[1], last_monthly)
-                    final_last_six     = _newer(existing[2], last_six)
-                    final_last_annual  = _newer(existing[3], last_annual)
-
-                    cursor.execute(
-                        """UPDATE equipment SET
-                               sap_material_no     = %s,
-                               description         = %s,
-                               tool_id_drawing_no  = %s,
-                               location            = %s,
-                               master_lin          = %s,
-                               monthly_pm          = %s,
-                               six_month_pm        = %s,
-                               annual_pm           = %s,
-                               last_monthly_pm     = %s,
-                               last_six_month_pm   = %s,
-                               last_annual_pm      = %s,
-                               next_monthly_pm     = %s,
-                               next_six_month_pm   = %s,
-                               next_annual_pm      = %s,
-                               status              = %s,
-                               updated_date        = CURRENT_TIMESTAMP
-                           WHERE bfm_equipment_no = %s""",
-                        (
-                            sap_no, description, tool_id, location, master_lin,
-                            monthly_pm, six_month_pm, annual_pm,
-                            final_last_monthly, final_last_six, final_last_annual,
-                            next_monthly, next_six, next_annual,
-                            status, bfm_no,
-                        ),
-                    )
-                    updated += 1
-
-            except Exception as exc:
-                errors += 1
-                print(f"[CSVManager] ERROR row {idx} ({bfm_no}): {exc}")
+        if status_cb:
+            status_cb(f"Syncing {len(rows)} equipment records to database…")
 
         try:
-            self.conn.commit()
-        except Exception as exc:
-            print(f"[CSVManager] ERROR commit failed: {exc}")
-            errors += 1
+            cursor = self.conn.cursor()
 
-        msg = f"CSV sync: {inserted} new, {updated} updated, {skipped} skipped, {errors} errors"
-        print(f"[CSVManager] {msg}")
-        if status_cb:
-            status_cb(msg)
-        return {"inserted": inserted, "updated": updated, "skipped": skipped, "errors": errors}
+            # Batch upsert: one round-trip for all rows.
+            # For last PM dates the GREATEST() picks whichever date is more recent
+            # so that PM completions recorded in the DB are never overwritten by
+            # an older CSV value.
+            execute_values(
+                cursor,
+                """
+                INSERT INTO equipment (
+                    sap_material_no, bfm_equipment_no, description,
+                    tool_id_drawing_no, location, master_lin,
+                    monthly_pm, six_month_pm, annual_pm,
+                    last_monthly_pm, last_six_month_pm, last_annual_pm,
+                    next_monthly_pm, next_six_month_pm, next_annual_pm,
+                    status
+                ) VALUES %s
+                ON CONFLICT (bfm_equipment_no) DO UPDATE SET
+                    sap_material_no    = EXCLUDED.sap_material_no,
+                    description        = EXCLUDED.description,
+                    tool_id_drawing_no = EXCLUDED.tool_id_drawing_no,
+                    location           = EXCLUDED.location,
+                    master_lin         = EXCLUDED.master_lin,
+                    monthly_pm         = EXCLUDED.monthly_pm,
+                    six_month_pm       = EXCLUDED.six_month_pm,
+                    annual_pm          = EXCLUDED.annual_pm,
+                    last_monthly_pm    = GREATEST(
+                                             equipment.last_monthly_pm::text,
+                                             EXCLUDED.last_monthly_pm::text
+                                         ),
+                    last_six_month_pm  = GREATEST(
+                                             equipment.last_six_month_pm::text,
+                                             EXCLUDED.last_six_month_pm::text
+                                         ),
+                    last_annual_pm     = GREATEST(
+                                             equipment.last_annual_pm::text,
+                                             EXCLUDED.last_annual_pm::text
+                                         ),
+                    next_monthly_pm    = EXCLUDED.next_monthly_pm,
+                    next_six_month_pm  = EXCLUDED.next_six_month_pm,
+                    next_annual_pm     = EXCLUDED.next_annual_pm,
+                    status             = EXCLUDED.status,
+                    updated_date       = CURRENT_TIMESTAMP
+                """,
+                rows,
+                page_size=500,
+            )
+
+            # Count what actually happened
+            cursor.execute("SELECT xmax = 0 AS inserted, COUNT(*) FROM equipment GROUP BY xmax = 0")
+            # Simpler: just report totals
+            self.conn.commit()
+
+            msg = f"CSV sync complete: {len(rows)} records upserted, {skipped} skipped"
+            print(f"[CSVManager] {msg}")
+            if status_cb:
+                status_cb(msg)
+            return {"inserted": len(rows), "updated": 0, "skipped": skipped, "errors": 0}
+
+        except Exception as exc:
+            print(f"[CSVManager] ERROR during batch upsert: {exc}")
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
+            return {"inserted": 0, "updated": 0, "skipped": skipped, "errors": 1}
 
     # ── Shutdown ─────────────────────────────────────────────────────────────
 

@@ -7499,51 +7499,46 @@ class AITCMMSSystem:
         print(f"AIT Complete CMMS System initialized successfully for {self.user_name} ({self.current_user_role})")
 
     def _deferred_startup_tasks(self):
-        """Load data after UI is displayed to keep startup responsive"""
-        try:
-            # PERFORMANCE FIX: Don't load equipment data at startup
-            # It will be loaded on-demand when first accessed
-            # This saves 20-30 seconds at startup for large equipment tables
+        """Kick off background startup work so the UI stays responsive."""
+        import threading
 
-            # Sync PM Master CSV into the database
-            if hasattr(self, 'csv_manager'):
-                try:
-                    def _csv_status(msg):
-                        if hasattr(self, 'update_status'):
-                            self.update_status(msg)
-                    result = self.csv_manager.startup_sync(status_cb=_csv_status)
-                    ins = result.get('inserted', 0)
-                    upd = result.get('updated', 0)
-                    if ins or upd:
-                        print(f"[Startup] CSV sync: {ins} new equipment, {upd} updated")
-                except Exception as _csv_err:
-                    print(f"WARNING [Startup CSV sync]: {_csv_err}")
+        def _ui(fn):
+            """Schedule fn() on the main thread from a background thread."""
+            self.root.after(0, fn)
 
-            # Update status
-            if hasattr(self, 'update_status'):
-                self.update_status("Checking database status...")
-
-            # Check if database needs restore
-            self.check_empty_database_and_offer_restore()
-
-            # AUTO-MIGRATION: Fix Cannot Find schedules retroactively
-            # This will update any past PM schedules that should be marked as "Cannot Find"
-            if hasattr(self, 'update_status'):
-                self.update_status("Checking for Cannot Find schedule updates...")
+        def _background():
             try:
-                updated_count = self.fix_cannot_find_schedules_retroactive(silent=True)
-                if updated_count > 0:
-                    print(f"AUTO-MIGRATION: Updated {updated_count} PM schedules to 'Cannot Find' status")
-            except Exception as e:
-                print(f"Error in Cannot Find schedule migration: {e}")
+                # 1. CSV batch upsert (single round-trip, non-blocking to UI)
+                if hasattr(self, 'csv_manager'):
+                    try:
+                        _ui(lambda: self.update_status("Syncing PM Master CSV…"))
+                        result = self.csv_manager.startup_sync()
+                        n = result.get('inserted', 0)
+                        print(f"[Startup] CSV sync done: {n} records upserted")
+                    except Exception as _csv_err:
+                        print(f"WARNING [Startup CSV sync]: {_csv_err}")
 
-            if hasattr(self, 'update_status'):
-                self.update_status("Ready")
+                # 2. Check if DB is empty and offer restore (must run on main thread)
+                _ui(lambda: self.update_status("Checking database…"))
+                _ui(self.check_empty_database_and_offer_restore)
 
-        except Exception as e:
-            print(f"Error in deferred startup tasks: {e}")
-            import traceback
-            traceback.print_exc()
+                # 3. Cannot-Find retroactive fix
+                try:
+                    updated = self.fix_cannot_find_schedules_retroactive(silent=True)
+                    if updated:
+                        print(f"[Startup] Cannot-Find migration: {updated} schedules updated")
+                except Exception as _e:
+                    print(f"WARNING [Startup CF migration]: {_e}")
+
+                _ui(lambda: self.update_status("Ready"))
+
+            except Exception as exc:
+                import traceback
+                print(f"ERROR in background startup: {exc}")
+                traceback.print_exc()
+                _ui(lambda: self.update_status("Ready"))
+
+        threading.Thread(target=_background, daemon=True).start()
 
     def _async_update_statistics(self):
         """Update statistics asynchronously without blocking UI"""
