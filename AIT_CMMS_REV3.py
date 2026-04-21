@@ -1354,10 +1354,9 @@ class PMSchedulingService:
         # Batch insert all assignments at once
         print(f"DEBUG: Saving {len(batch_insert_data)} assignments to database (batch insert)...")
         cursor.executemany('''
-            INSERT INTO weekly_pm_schedules
+            INSERT OR IGNORE INTO weekly_pm_schedules
             (week_start_date, bfm_equipment_no, pm_type, assigned_technician, scheduled_date)
             VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT (week_start_date, bfm_equipment_no, pm_type) DO NOTHING
         ''', batch_insert_data)
 
         print(f"DEBUG: Finished assigning {len(scheduled_assignments)} PMs across "
@@ -10362,6 +10361,13 @@ class AITCMMSSystem:
                 print("✓ Created index: idx_cm_completion_date")
 
             # === Weekly PM Schedules Table Indexes ===
+            # UNIQUENESS CONSTRAINT: one assignment per equipment per PM type per week
+            cursor.execute('''
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_weekly_pm_schedule
+                ON weekly_pm_schedules (week_start_date, bfm_equipment_no, pm_type)
+            ''')
+            print("✓ Created index: idx_unique_weekly_pm_schedule")
+
             # PERFORMANCE OPTIMIZATION: Support technician schedule queries (fix N+1 pattern)
             cursor.execute('''
                 CREATE INDEX IF NOT EXISTS idx_weekly_pm_technician_week
