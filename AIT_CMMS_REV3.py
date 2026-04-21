@@ -1169,22 +1169,27 @@ class PMSchedulingService:
         """Get list of active equipment from database - EXCLUDES Cannot Find, Run to Failure, Deactivated, and equipment with no PM schedules"""
         cursor = self.conn.cursor()
         cursor.execute('''
-            SELECT DISTINCT ON (bfm_equipment_no)
-                bfm_equipment_no, sap_material_no, description, weekly_pm, monthly_pm, six_month_pm, annual_pm,
+            SELECT bfm_equipment_no, sap_material_no, description, weekly_pm, monthly_pm, six_month_pm, annual_pm,
                 last_weekly_pm, last_monthly_pm, last_six_month_pm, last_annual_pm, COALESCE(status, 'Active') as status
-            FROM equipment
-            WHERE (status = 'Active' OR status IS NULL)
-            AND status NOT IN ('Run to Failure', 'Missing')
-            AND bfm_equipment_no NOT IN (
-                SELECT DISTINCT bfm_equipment_no FROM cannot_find_assets WHERE status = 'Missing'
-            )
-            AND bfm_equipment_no NOT IN (
-                SELECT DISTINCT bfm_equipment_no FROM run_to_failure_assets
-            )
-            AND bfm_equipment_no NOT IN (
-                SELECT DISTINCT bfm_equipment_no FROM deactivated_assets
-            )
-            AND (weekly_pm = TRUE OR monthly_pm = TRUE OR six_month_pm = TRUE OR annual_pm = TRUE)
+            FROM (
+                SELECT bfm_equipment_no, sap_material_no, description, weekly_pm, monthly_pm, six_month_pm, annual_pm,
+                    last_weekly_pm, last_monthly_pm, last_six_month_pm, last_annual_pm, status,
+                    ROW_NUMBER() OVER (PARTITION BY bfm_equipment_no ORDER BY rowid) as rn
+                FROM equipment
+                WHERE (status = 'Active' OR status IS NULL)
+                AND status NOT IN ('Run to Failure', 'Missing')
+                AND bfm_equipment_no NOT IN (
+                    SELECT DISTINCT bfm_equipment_no FROM cannot_find_assets WHERE status = 'Missing'
+                )
+                AND bfm_equipment_no NOT IN (
+                    SELECT DISTINCT bfm_equipment_no FROM run_to_failure_assets
+                )
+                AND bfm_equipment_no NOT IN (
+                    SELECT DISTINCT bfm_equipment_no FROM deactivated_assets
+                )
+                AND (weekly_pm = TRUE OR monthly_pm = TRUE OR six_month_pm = TRUE OR annual_pm = TRUE)
+            ) ranked
+            WHERE rn = 1
             ORDER BY bfm_equipment_no
         ''')
 
@@ -1262,19 +1267,17 @@ class PMSchedulingService:
         if all_bfm_nos:
             placeholders = ','.join(['%s'] * len(all_bfm_nos))
             cursor.execute(f'''
-                SELECT DISTINCT ON (w.bfm_equipment_no) w.bfm_equipment_no, w.assigned_technician
-                FROM weekly_pm_schedules w
-                INNER JOIN (
-                    SELECT bfm_equipment_no, MAX(week_start_date) AS latest_week
+                SELECT bfm_equipment_no, assigned_technician
+                FROM (
+                    SELECT bfm_equipment_no, assigned_technician,
+                        ROW_NUMBER() OVER (PARTITION BY bfm_equipment_no ORDER BY week_start_date DESC, id DESC) as rn
                     FROM weekly_pm_schedules
                     WHERE bfm_equipment_no IN ({placeholders})
                     AND week_start_date < %s
                     AND assigned_technician IS NOT NULL
                     AND assigned_technician != ''
-                    GROUP BY bfm_equipment_no
-                ) recent ON w.bfm_equipment_no = recent.bfm_equipment_no
-                         AND w.week_start_date = recent.latest_week
-                ORDER BY w.bfm_equipment_no, w.id DESC
+                ) ranked
+                WHERE rn = 1
             ''', all_bfm_nos + [week_start_str])
             last_tech_per_bfm = {row[0]: row[1] for row in cursor.fetchall()}
 
