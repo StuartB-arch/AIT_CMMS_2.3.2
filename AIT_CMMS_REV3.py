@@ -6951,19 +6951,20 @@ class AITCMMSSystem:
                 # Look for the closest upcoming (or most recently scheduled) entry
                 # across ALL weeks so Monthly/Six Month/Annual PMs are found too.
                 cursor.execute('''
-                    SELECT pm_type, assigned_technician, scheduled_date
+                    SELECT pm_type, assigned_technician, scheduled_date, week_start_date
                     FROM weekly_pm_schedules
                     WHERE bfm_equipment_no = %s AND status = 'Scheduled'
                     ORDER BY
-                        CASE WHEN scheduled_date::date <= %s::date THEN 0 ELSE 1 END ASC,
-                        ABS(scheduled_date::date - %s::date) ASC
+                        CASE WHEN COALESCE(week_start_date, scheduled_date)::date <= %s::date THEN 0 ELSE 1 END ASC,
+                        ABS(COALESCE(week_start_date, scheduled_date)::date - %s::date) ASC
                     LIMIT 1
                 ''', (bfm_no, today_str, today_str))
 
                 schedule_result = cursor.fetchone()
 
                 if schedule_result:
-                    sched_pm_type, sched_technician, sched_date = schedule_result
+                    sched_pm_type, sched_technician, sched_date, sched_week = schedule_result
+                    print(f"DEBUG PM lookup: BFM={bfm_no}, week={sched_week}, tech={sched_technician}, type={sched_pm_type}")
                     if sched_pm_type:
                         self.pm_type_var.set(sched_pm_type)
                         pm_type = sched_pm_type
@@ -6972,7 +6973,7 @@ class AITCMMSSystem:
                     if sched_date:
                         self.pm_due_date_var.set(sched_date)
                     self.update_status(
-                        f"Auto-filled from schedule: {sched_pm_type} PM assigned to {sched_technician}"
+                        f"Auto-filled from schedule: {sched_pm_type} PM assigned to {sched_technician} (week of {sched_week})"
                     )
                 else:
                     # Fallback: read PM cycles and next due dates directly from equipment table
@@ -7017,24 +7018,25 @@ class AITCMMSSystem:
             else:
                 # Both BFM and PM type are set — look for any matching scheduled entry
                 cursor.execute('''
-                    SELECT assigned_technician, scheduled_date
+                    SELECT assigned_technician, scheduled_date, week_start_date
                     FROM weekly_pm_schedules
                     WHERE bfm_equipment_no = %s AND pm_type = %s AND status = 'Scheduled'
                     ORDER BY
-                        CASE WHEN scheduled_date::date <= %s::date THEN 0 ELSE 1 END ASC,
-                        ABS(scheduled_date::date - %s::date) ASC
+                        CASE WHEN COALESCE(week_start_date, scheduled_date)::date <= %s::date THEN 0 ELSE 1 END ASC,
+                        ABS(COALESCE(week_start_date, scheduled_date)::date - %s::date) ASC
                     LIMIT 1
                 ''', (bfm_no, pm_type, today_str, today_str))
 
                 schedule_result = cursor.fetchone()
 
                 if schedule_result:
-                    sched_technician, sched_date = schedule_result
+                    sched_technician, sched_date, sched_week = schedule_result
+                    print(f"DEBUG PM lookup: BFM={bfm_no}, pm_type={pm_type}, week={sched_week}, tech={sched_technician}")
                     if sched_technician:
                         self.completion_tech_var.set(sched_technician)
                     if sched_date:
                         self.pm_due_date_var.set(sched_date)
-                    self.update_status(f"PM Due Date: {sched_date}")
+                    self.update_status(f"PM Due Date: {sched_date}, Technician: {sched_technician} (week of {sched_week})")
                 else:
                     # Fallback: pull due date for this PM type from equipment table
                     type_to_col = {
@@ -9889,19 +9891,20 @@ class AITCMMSSystem:
                 # Look for the closest upcoming (or most recently scheduled) entry
                 # across ALL weeks so Monthly/Six Month/Annual PMs are found too.
                 cursor.execute('''
-                    SELECT pm_type, assigned_technician, scheduled_date
+                    SELECT pm_type, assigned_technician, scheduled_date, week_start_date
                     FROM weekly_pm_schedules
                     WHERE bfm_equipment_no = %s AND status = 'Scheduled'
                     ORDER BY
-                        CASE WHEN scheduled_date::date <= %s::date THEN 0 ELSE 1 END ASC,
-                        ABS(scheduled_date::date - %s::date) ASC
+                        CASE WHEN COALESCE(week_start_date, scheduled_date)::date <= %s::date THEN 0 ELSE 1 END ASC,
+                        ABS(COALESCE(week_start_date, scheduled_date)::date - %s::date) ASC
                     LIMIT 1
                 ''', (bfm_no, today_str, today_str))
 
                 schedule_result = cursor.fetchone()
 
                 if schedule_result:
-                    sched_pm_type, sched_technician, sched_date = schedule_result
+                    sched_pm_type, sched_technician, sched_date, sched_week = schedule_result
+                    print(f"DEBUG PM lookup: BFM={bfm_no}, week={sched_week}, tech={sched_technician}, type={sched_pm_type}")
                     if sched_pm_type:
                         self.pm_type_var.set(sched_pm_type)
                         pm_type = sched_pm_type
@@ -9910,7 +9913,7 @@ class AITCMMSSystem:
                     if sched_date:
                         self.pm_due_date_var.set(sched_date)
                     self.update_status(
-                        f"Auto-filled from schedule: {sched_pm_type} PM assigned to {sched_technician}"
+                        f"Auto-filled from schedule: {sched_pm_type} PM assigned to {sched_technician} (week of {sched_week})"
                     )
                 else:
                     # Fallback: read PM cycles and next due dates directly from equipment table
@@ -9955,24 +9958,25 @@ class AITCMMSSystem:
             else:
                 # Both BFM and PM type are set — look for any matching scheduled entry
                 cursor.execute('''
-                    SELECT assigned_technician, scheduled_date
+                    SELECT assigned_technician, scheduled_date, week_start_date
                     FROM weekly_pm_schedules
                     WHERE bfm_equipment_no = %s AND pm_type = %s AND status = 'Scheduled'
                     ORDER BY
-                        CASE WHEN scheduled_date::date <= %s::date THEN 0 ELSE 1 END ASC,
-                        ABS(scheduled_date::date - %s::date) ASC
+                        CASE WHEN COALESCE(week_start_date, scheduled_date)::date <= %s::date THEN 0 ELSE 1 END ASC,
+                        ABS(COALESCE(week_start_date, scheduled_date)::date - %s::date) ASC
                     LIMIT 1
                 ''', (bfm_no, pm_type, today_str, today_str))
 
                 schedule_result = cursor.fetchone()
 
                 if schedule_result:
-                    sched_technician, sched_date = schedule_result
+                    sched_technician, sched_date, sched_week = schedule_result
+                    print(f"DEBUG PM lookup: BFM={bfm_no}, pm_type={pm_type}, week={sched_week}, tech={sched_technician}")
                     if sched_technician:
                         self.completion_tech_var.set(sched_technician)
                     if sched_date:
                         self.pm_due_date_var.set(sched_date)
-                    self.update_status(f"PM Due Date: {sched_date}")
+                    self.update_status(f"PM Due Date: {sched_date}, Technician: {sched_technician} (week of {sched_week})")
                 else:
                     # Fallback: pull due date for this PM type from equipment table
                     type_to_col = {
