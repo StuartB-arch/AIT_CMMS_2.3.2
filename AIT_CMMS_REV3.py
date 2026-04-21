@@ -11128,7 +11128,7 @@ class AITCMMSSystem:
         for a different site's files and immediately re-syncs the database."""
         dialog = tk.Toplevel(self.root)
         dialog.title("Site Setup — CSV File Configuration")
-        dialog.geometry("620x360")
+        dialog.geometry("640x440")
         dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
@@ -11145,41 +11145,23 @@ class AITCMMSSystem:
 
         current_asset = getattr(self.csv_manager, 'path', None)
         asset_path_var = tk.StringVar(value=str(current_asset) if current_asset else "")
+        replace_all_asset_var = tk.BooleanVar(value=False)
 
         ttk.Label(asset_frame, text="File:").grid(row=0, column=0, sticky='w')
-        ttk.Entry(asset_frame, textvariable=asset_path_var, width=52,
+        ttk.Entry(asset_frame, textvariable=asset_path_var, width=48,
                   state='readonly').grid(row=0, column=1, padx=6, sticky='ew')
+        ttk.Button(asset_frame, text="Browse…", command=lambda: _browse(asset_path_var,
+                   "Select Master Asset CSV")).grid(row=0, column=2, padx=(4, 0))
 
-        def browse_asset():
-            p = filedialog.askopenfilename(
-                parent=dialog, title="Select Master Asset CSV",
-                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
-            if p:
-                asset_path_var.set(p)
+        ttk.Checkbutton(
+            asset_frame,
+            text="Replace All  —  delete ALL existing equipment, schedules & PM history first",
+            variable=replace_all_asset_var,
+        ).grid(row=1, column=0, columnspan=3, sticky='w', pady=(6, 0))
 
-        def import_asset():
-            src = asset_path_var.get()
-            if not src or not os.path.isfile(src):
-                messagebox.showerror("Error", "Please select a valid CSV file.", parent=dialog)
-                return
-            import shutil
-            dest = self.csv_manager.path
-            try:
-                shutil.copy2(src, dest)
-                status_var.set("Syncing Master Asset CSV…")
-                dialog.update_idletasks()
-                result = self.csv_manager.startup_sync()
-                n = result.get('inserted', 0)
-                self.refresh_equipment_list()
-                self.update_status(f"Asset CSV imported: {n} records synced")
-                status_var.set(f"Done — {n} asset records synced.")
-            except Exception as exc:
-                messagebox.showerror("Import Error", str(exc), parent=dialog)
-
-        ttk.Button(asset_frame, text="Browse…", command=browse_asset).grid(
-            row=0, column=2, padx=(4, 0))
-        ttk.Button(asset_frame, text="Import & Sync", command=import_asset).grid(
-            row=1, column=1, pady=(8, 0), sticky='w', padx=6)
+        ttk.Button(asset_frame, text="Import & Sync",
+                   command=lambda: import_asset()).grid(
+            row=2, column=1, pady=(8, 0), sticky='w', padx=6)
 
         # ── MRO Stock CSV ───────────────────────────────────────────────────
         mro_frame = ttk.LabelFrame(dialog, text="MRO Stock CSV  (MRO_STOCK)", padding=10)
@@ -11190,17 +11172,79 @@ class AITCMMSSystem:
                    else None)
         current_mro = getattr(mro_csv, 'path', None)
         mro_path_var = tk.StringVar(value=str(current_mro) if current_mro else "")
+        replace_all_mro_var = tk.BooleanVar(value=False)
 
         ttk.Label(mro_frame, text="File:").grid(row=0, column=0, sticky='w')
-        ttk.Entry(mro_frame, textvariable=mro_path_var, width=52,
+        ttk.Entry(mro_frame, textvariable=mro_path_var, width=48,
                   state='readonly').grid(row=0, column=1, padx=6, sticky='ew')
+        ttk.Button(mro_frame, text="Browse…", command=lambda: _browse(mro_path_var,
+                   "Select MRO Stock CSV")).grid(row=0, column=2, padx=(4, 0))
 
-        def browse_mro():
+        ttk.Checkbutton(
+            mro_frame,
+            text="Replace All  —  delete ALL existing MRO inventory first",
+            variable=replace_all_mro_var,
+        ).grid(row=1, column=0, columnspan=3, sticky='w', pady=(6, 0))
+
+        ttk.Button(mro_frame, text="Import & Sync",
+                   command=lambda: import_mro()).grid(
+            row=2, column=1, pady=(8, 0), sticky='w', padx=6)
+
+        # ── Status bar ──────────────────────────────────────────────────────
+        status_var = tk.StringVar(value="Ready")
+        ttk.Label(dialog, textvariable=status_var, foreground='gray').pack(pady=(8, 4))
+        ttk.Button(dialog, text="Close", command=dialog.destroy).pack(pady=(0, 12))
+
+        # ── Shared helpers (defined after status_var exists) ────────────────
+        def _browse(path_var, title):
             p = filedialog.askopenfilename(
-                parent=dialog, title="Select MRO Stock CSV",
+                parent=dialog, title=title,
                 filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
             if p:
-                mro_path_var.set(p)
+                path_var.set(p)
+
+        def _clear_asset_tables(cursor):
+            """Delete all site data in dependency order so FK constraints don't fire."""
+            for tbl in ('weekly_pm_schedules', 'pm_completions', 'equipment'):
+                cursor.execute(f'DELETE FROM {tbl}')
+
+        def _clear_mro_tables(cursor):
+            cursor.execute('DELETE FROM mro_inventory')
+
+        def import_asset():
+            src = asset_path_var.get()
+            if not src or not os.path.isfile(src):
+                messagebox.showerror("Error", "Please select a valid CSV file.", parent=dialog)
+                return
+            if replace_all_asset_var.get():
+                if not messagebox.askyesno(
+                    "Replace All — Are you sure?",
+                    "This will permanently delete ALL equipment records, PM schedules,\n"
+                    "and PM completion history before loading the new file.\n\n"
+                    "This cannot be undone. Continue?",
+                    icon='warning', parent=dialog
+                ):
+                    return
+            import shutil
+            dest = self.csv_manager.path
+            try:
+                shutil.copy2(src, dest)
+                if replace_all_asset_var.get():
+                    status_var.set("Clearing existing asset data…")
+                    dialog.update_idletasks()
+                    cursor = self.conn.cursor()
+                    _clear_asset_tables(cursor)
+                    self.conn.commit()
+                    cursor.close()
+                status_var.set("Syncing Master Asset CSV…")
+                dialog.update_idletasks()
+                result = self.csv_manager.startup_sync()
+                n = result.get('inserted', 0)
+                self.refresh_equipment_list()
+                self.update_status(f"Asset CSV imported: {n} records synced")
+                status_var.set(f"Done — {n} asset records loaded.")
+            except Exception as exc:
+                messagebox.showerror("Import Error", str(exc), parent=dialog)
 
         def import_mro():
             src = mro_path_var.get()
@@ -11210,10 +11254,26 @@ class AITCMMSSystem:
             if mro_csv is None:
                 messagebox.showerror("Error", "MRO manager not available.", parent=dialog)
                 return
+            if replace_all_mro_var.get():
+                if not messagebox.askyesno(
+                    "Replace All — Are you sure?",
+                    "This will permanently delete ALL MRO inventory records\n"
+                    "before loading the new file.\n\n"
+                    "This cannot be undone. Continue?",
+                    icon='warning', parent=dialog
+                ):
+                    return
             import shutil
             dest = mro_csv.path
             try:
                 shutil.copy2(src, dest)
+                if replace_all_mro_var.get():
+                    status_var.set("Clearing existing MRO inventory…")
+                    dialog.update_idletasks()
+                    cursor = self.conn.cursor()
+                    _clear_mro_tables(cursor)
+                    self.conn.commit()
+                    cursor.close()
                 status_var.set("Syncing MRO Stock CSV…")
                 dialog.update_idletasks()
                 result = mro_csv.startup_sync()
@@ -11221,19 +11281,9 @@ class AITCMMSSystem:
                 if hasattr(self.mro_manager, 'refresh_mro_list'):
                     self.mro_manager.refresh_mro_list()
                 self.update_status(f"MRO CSV imported: {n} parts synced")
-                status_var.set(f"Done — {n} MRO parts synced.")
+                status_var.set(f"Done — {n} MRO parts loaded.")
             except Exception as exc:
                 messagebox.showerror("Import Error", str(exc), parent=dialog)
-
-        ttk.Button(mro_frame, text="Browse…", command=browse_mro).grid(
-            row=0, column=2, padx=(4, 0))
-        ttk.Button(mro_frame, text="Import & Sync", command=import_mro).grid(
-            row=1, column=1, pady=(8, 0), sticky='w', padx=6)
-
-        # ── Status bar ──────────────────────────────────────────────────────
-        status_var = tk.StringVar(value="Ready")
-        ttk.Label(dialog, textvariable=status_var, foreground='gray').pack(pady=(8, 4))
-        ttk.Button(dialog, text="Close", command=dialog.destroy).pack(pady=(0, 12))
 
     def open_backup_manager(self):
         """Open database backup manager (Manager only)"""
