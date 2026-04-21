@@ -6954,9 +6954,11 @@ class AITCMMSSystem:
                     SELECT pm_type, assigned_technician, scheduled_date
                     FROM weekly_pm_schedules
                     WHERE bfm_equipment_no = %s AND status = 'Scheduled'
-                    ORDER BY ABS(scheduled_date::date - %s::date) ASC
+                    ORDER BY
+                        CASE WHEN scheduled_date::date <= %s::date THEN 0 ELSE 1 END ASC,
+                        ABS(scheduled_date::date - %s::date) ASC
                     LIMIT 1
-                ''', (bfm_no, today_str))
+                ''', (bfm_no, today_str, today_str))
 
                 schedule_result = cursor.fetchone()
 
@@ -7018,9 +7020,11 @@ class AITCMMSSystem:
                     SELECT assigned_technician, scheduled_date
                     FROM weekly_pm_schedules
                     WHERE bfm_equipment_no = %s AND pm_type = %s AND status = 'Scheduled'
-                    ORDER BY ABS(scheduled_date::date - %s::date) ASC
+                    ORDER BY
+                        CASE WHEN scheduled_date::date <= %s::date THEN 0 ELSE 1 END ASC,
+                        ABS(scheduled_date::date - %s::date) ASC
                     LIMIT 1
-                ''', (bfm_no, pm_type, today_str))
+                ''', (bfm_no, pm_type, today_str, today_str))
 
                 schedule_result = cursor.fetchone()
 
@@ -9888,9 +9892,11 @@ class AITCMMSSystem:
                     SELECT pm_type, assigned_technician, scheduled_date
                     FROM weekly_pm_schedules
                     WHERE bfm_equipment_no = %s AND status = 'Scheduled'
-                    ORDER BY ABS(scheduled_date::date - %s::date) ASC
+                    ORDER BY
+                        CASE WHEN scheduled_date::date <= %s::date THEN 0 ELSE 1 END ASC,
+                        ABS(scheduled_date::date - %s::date) ASC
                     LIMIT 1
-                ''', (bfm_no, today_str))
+                ''', (bfm_no, today_str, today_str))
 
                 schedule_result = cursor.fetchone()
 
@@ -9952,9 +9958,11 @@ class AITCMMSSystem:
                     SELECT assigned_technician, scheduled_date
                     FROM weekly_pm_schedules
                     WHERE bfm_equipment_no = %s AND pm_type = %s AND status = 'Scheduled'
-                    ORDER BY ABS(scheduled_date::date - %s::date) ASC
+                    ORDER BY
+                        CASE WHEN scheduled_date::date <= %s::date THEN 0 ELSE 1 END ASC,
+                        ABS(scheduled_date::date - %s::date) ASC
                     LIMIT 1
-                ''', (bfm_no, pm_type, today_str))
+                ''', (bfm_no, pm_type, today_str, today_str))
 
                 schedule_result = cursor.fetchone()
 
