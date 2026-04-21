@@ -1169,7 +1169,8 @@ class PMSchedulingService:
         """Get list of active equipment from database - EXCLUDES Cannot Find, Run to Failure, Deactivated, and equipment with no PM schedules"""
         cursor = self.conn.cursor()
         cursor.execute('''
-            SELECT bfm_equipment_no, sap_material_no, description, weekly_pm, monthly_pm, six_month_pm, annual_pm,
+            SELECT DISTINCT ON (bfm_equipment_no)
+                bfm_equipment_no, sap_material_no, description, weekly_pm, monthly_pm, six_month_pm, annual_pm,
                 last_weekly_pm, last_monthly_pm, last_six_month_pm, last_annual_pm, COALESCE(status, 'Active') as status
             FROM equipment
             WHERE (status = 'Active' OR status IS NULL)
@@ -1261,7 +1262,7 @@ class PMSchedulingService:
         if all_bfm_nos:
             placeholders = ','.join(['%s'] * len(all_bfm_nos))
             cursor.execute(f'''
-                SELECT w.bfm_equipment_no, w.assigned_technician
+                SELECT DISTINCT ON (w.bfm_equipment_no) w.bfm_equipment_no, w.assigned_technician
                 FROM weekly_pm_schedules w
                 INNER JOIN (
                     SELECT bfm_equipment_no, MAX(week_start_date) AS latest_week
@@ -1273,6 +1274,7 @@ class PMSchedulingService:
                     GROUP BY bfm_equipment_no
                 ) recent ON w.bfm_equipment_no = recent.bfm_equipment_no
                          AND w.week_start_date = recent.latest_week
+                ORDER BY w.bfm_equipment_no, w.id DESC
             ''', all_bfm_nos + [week_start_str])
             last_tech_per_bfm = {row[0]: row[1] for row in cursor.fetchall()}
 
@@ -1333,12 +1335,26 @@ class PMSchedulingService:
                       f"~{remaining} lower-priority PMs deferred to future weeks)")
                 break
 
+        # Deduplicate: keep the first assignment when the same BFM+pm_type appears
+        # more than once in a week (can happen if equipment table has duplicate rows).
+        seen_keys = set()
+        deduped = []
+        for row in batch_insert_data:
+            key = (row[0], row[1], row[2])  # week_start_date, bfm_no, pm_type
+            if key not in seen_keys:
+                seen_keys.add(key)
+                deduped.append(row)
+        if len(deduped) < len(batch_insert_data):
+            print(f"DEBUG: Removed {len(batch_insert_data) - len(deduped)} duplicate BFM/pm_type entries before insert")
+        batch_insert_data = deduped
+
         # Batch insert all assignments at once
         print(f"DEBUG: Saving {len(batch_insert_data)} assignments to database (batch insert)...")
         cursor.executemany('''
             INSERT INTO weekly_pm_schedules
             (week_start_date, bfm_equipment_no, pm_type, assigned_technician, scheduled_date)
             VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (week_start_date, bfm_equipment_no, pm_type) DO NOTHING
         ''', batch_insert_data)
 
         print(f"DEBUG: Finished assigning {len(scheduled_assignments)} PMs across "
@@ -10497,6 +10513,11 @@ class AITCMMSSystem:
                     FOREIGN KEY (bfm_equipment_no) REFERENCES equipment (bfm_equipment_no)
                 )
             ''')
+            # Enforce one assignment per equipment per PM type per week at the DB level.
+            cursor.execute('''
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_weekly_pm_schedule
+                ON weekly_pm_schedules (week_start_date, bfm_equipment_no, pm_type)
+            ''')
 
             # SCHEMA MIGRATION: Add missing columns if they don't exist
             # This ensures existing databases are updated to the new schema
@@ -14945,27 +14966,22 @@ class AITCMMSSystem:
             # WARNING: ENHANCED VALIDATION - Check for recent duplicates
             validation_result = self.validate_pm_completion(cursor, bfm_no, pm_type, technician, completion_date)
             if not validation_result['valid']:
-                # Show detailed warning dialog
-                response = messagebox.askyesno(
-                    "WARNING: Potential Duplicate PM Detected",
+                # Hard block — duplicate completions are never allowed
+                try:
+                    self.conn.rollback()
+                except Exception:
+                    pass
+                messagebox.showerror(
+                    "Duplicate PM — Submission Blocked",
                     f"{validation_result['message']}\n\n"
-                    f"Details:\n"
-                    f"- Equipment: {bfm_no}\n"
-                    f"- PM Type: {pm_type}\n"
-                    f"- Technician: {technician}\n"
-                    f"- Completion Date: {completion_date}\n\n"
-                    f"Do you want to proceed anyway?\n\n"
-                    f"Click 'No' to review and make changes.",
-                    icon='warning'
+                    f"Equipment : {bfm_no}\n"
+                    f"PM Type   : {pm_type}\n"
+                    f"Technician: {technician}\n"
+                    f"Date      : {completion_date}\n\n"
+                    f"This PM has already been recorded. No action was taken."
                 )
-                if not response:
-                    # User chose not to proceed - rollback any pending transaction
-                    try:
-                        self.conn.rollback()
-                    except:
-                        pass
-                    self.update_status("PM submission cancelled - potential duplicate detected")
-                    return
+                self.update_status("PM submission blocked — duplicate detected")
+                return
 
             # Auto-calculate next annual PM date if blank
             if not next_annual_pm and pm_type in ['Monthly', 'Six Month', 'Annual']:
@@ -15179,9 +15195,7 @@ class AITCMMSSystem:
                     threshold = min_days.get(pm_type, 7)  # Default 7 days for other types
                 
                     if days_since < threshold:
-                        issues.append(f"WARNING: DUPLICATE DETECTED: {pm_type} PM for {bfm_no} was completed only {days_since} days ago")
-                        issues.append(f"   Previous completion: {last_completion_date} by {last_technician}")
-                        issues.append(f"   Minimum interval for {pm_type} PM: {threshold} days")
+                        issues.append(f"BLOCKED: {pm_type} PM for {bfm_no} was already completed {days_since} day(s) ago by {last_technician} on {last_completion_date}. Minimum interval is {threshold} days.")
                     
                 except ValueError:
                     # If date parsing fails, flag it as potential issue
