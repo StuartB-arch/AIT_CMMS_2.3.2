@@ -11264,14 +11264,13 @@ class AITCMMSSystem:
             messagebox.showerror("Error", f"Failed to standardize dates: {str(e)}")
     
     def add_date_standardization_button(self):
-        """Add date standardization button to equipment tab"""
-        # Find the controls frame in equipment tab
-        for widget in self.equipment_frame.winfo_children():
-            if isinstance(widget, ttk.LabelFrame) and "Equipment Controls" in widget['text']:
-                ttk.Button(widget, text="Standardize All Dates (YYYY-MM-DD)", 
-                          command=self.standardize_all_database_dates,
-                          width=30).pack(side='left', padx=5)
-                break
+        """Add date standardization option to the equipment right-click menu."""
+        if hasattr(self, 'equipment_context_menu'):
+            self.equipment_context_menu.add_separator()
+            self.equipment_context_menu.add_command(
+                label="Standardize All Dates (YYYY-MM-DD)",
+                command=self.standardize_all_database_dates
+            )
     
     
 
@@ -11279,12 +11278,30 @@ class AITCMMSSystem:
         """Equipment management and data import tab"""
         self.equipment_frame = ttk.Frame(self.notebook)
         self.notebook.add(self.equipment_frame, text="Equipment Management")
-        
-        # Controls frame
-        controls_frame = ttk.LabelFrame(self.equipment_frame, text="Equipment Controls", padding=10)
-        controls_frame.pack(fill='x', padx=10, pady=5)
-        
-        # Add statistics frame after controls_frame
+
+        # Right-click context menu replaces the old Equipment Controls bar
+        self.equipment_context_menu = tk.Menu(self.equipment_frame, tearoff=0)
+        self.equipment_context_menu.add_command(label="Add Equipment",
+                                                command=self.add_equipment_dialog)
+        self.equipment_context_menu.add_command(label="Edit Equipment",
+                                                command=self.edit_equipment_dialog)
+        self.equipment_context_menu.add_command(label="Delete Equipment",
+                                                command=self.delete_equipment_dialog)
+        self.equipment_context_menu.add_separator()
+        self.equipment_context_menu.add_command(label="Import Equipment CSV",
+                                                command=self.import_equipment_csv)
+        self.equipment_context_menu.add_command(label="Export Equipment",
+                                                command=self.export_equipment_list)
+        self.equipment_context_menu.add_separator()
+        self.equipment_context_menu.add_command(label="PM Frequency Report",
+                                                command=self.export_pm_frequency_report)
+        self.equipment_context_menu.add_command(label="Bulk Edit PM Cycles",
+                                                command=self.bulk_edit_pm_cycles)
+        self.equipment_context_menu.add_separator()
+        self.equipment_context_menu.add_command(label="Refresh List",
+                                                command=self.refresh_equipment_list)
+
+        # Add statistics frame
         stats_frame = ttk.LabelFrame(self.equipment_frame, text="Equipment Statistics", padding=10)
         stats_frame.pack(fill='x', padx=10, pady=5)
 
@@ -11317,24 +11334,6 @@ class AITCMMSSystem:
         # Refresh stats button
         ttk.Button(stats_frame, text="Refresh Stats",
                 command=self.update_equipment_statistics).pack(side='right', padx=5)
-        
-        
-        ttk.Button(controls_frame, text="Import Equipment CSV", 
-                  command=self.import_equipment_csv).pack(side='left', padx=5)
-        ttk.Button(controls_frame, text="Add Equipment",
-                  command=self.add_equipment_dialog).pack(side='left', padx=5)
-        ttk.Button(controls_frame, text="Edit Equipment",
-                  command=self.edit_equipment_dialog).pack(side='left', padx=5)
-        ttk.Button(controls_frame, text="Delete Equipment",
-                  command=self.delete_equipment_dialog).pack(side='left', padx=5)
-        ttk.Button(controls_frame, text="Refresh List",
-                  command=self.refresh_equipment_list).pack(side='left', padx=5)
-        ttk.Button(controls_frame, text="Export Equipment",
-                  command=self.export_equipment_list).pack(side='left', padx=5)
-        ttk.Button(controls_frame, text="PM Frequency Report",
-                  command=self.export_pm_frequency_report).pack(side='left', padx=5)
-        ttk.Button(controls_frame, text="Bulk Edit PM Cycles",
-                  command=self.bulk_edit_pm_cycles).pack(side='left', padx=5)
         
         
         # Search frame
@@ -11438,8 +11437,9 @@ class AITCMMSSystem:
         self.equip_total_count = 0
         self.equip_loaded_count = 0
 
-        # Bind double-click event to equipment list
+        # Bind double-click and right-click events to equipment list
         self.equipment_tree.bind('<Double-1>', self.on_equipment_double_click)
+        self.equipment_tree.bind('<Button-3>', self._show_equipment_context_menu)
 
         # Initialize equipment data on tab creation
         self.refresh_equipment_list()
@@ -22024,6 +22024,16 @@ class AITCMMSSystem:
             self.annual_pm_filter_var.set(False)
 
         self.filter_equipment_list()
+
+    def _show_equipment_context_menu(self, event):
+        """Show right-click context menu on the equipment treeview."""
+        item = self.equipment_tree.identify_row(event.y)
+        if item and item not in self.equipment_tree.selection():
+            self.equipment_tree.selection_set(item)
+        try:
+            self.equipment_context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.equipment_context_menu.grab_release()
 
     def on_equipment_double_click(self, event):
         """Handle double-click on equipment to schedule and print PM"""
