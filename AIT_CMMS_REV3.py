@@ -17068,17 +17068,21 @@ class AITCMMSSystem:
         dialog.grab_set()
 
         # Generate next CM number in format CM-YYYYMMDD-XXXX
-        cursor = self.conn.cursor()
-        today = datetime.now().strftime('%Y%m%d')
-        cursor.execute(
-            "SELECT MAX(CAST(SPLIT_PART(cm_number, '-', 3) AS INTEGER)) "
-            "FROM corrective_maintenance "
-            "WHERE cm_number LIKE %s",
-            (f'CM-{today}-%',)
-        )
-        result = cursor.fetchone()[0]
-        next_seq = (result + 1) if result else 1
-        next_cm_num = f"CM-{today}-{next_seq:04d}"
+        try:
+            cursor = self.conn.cursor()
+            today = datetime.now().strftime('%Y%m%d')
+            cursor.execute(
+                "SELECT MAX(CAST(SPLIT_PART(cm_number, '-', 3) AS INTEGER)) "
+                "FROM corrective_maintenance "
+                "WHERE cm_number LIKE %s",
+                (f'CM-{today}-%',)
+            )
+            result = cursor.fetchone()[0]
+            next_seq = (result + 1) if result else 1
+            next_cm_num = f"CM-{today}-{next_seq:04d}"
+        except Exception as e:
+            print(f"Error generating CM number: {e}")
+            next_cm_num = f"CM-{datetime.now().strftime('%Y%m%d')}-0001"
 
         row = 0
 

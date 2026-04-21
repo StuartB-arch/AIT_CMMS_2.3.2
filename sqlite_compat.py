@@ -231,6 +231,19 @@ class SqliteCursor:
             yield _row_to_dict(row, desc)
 
 
+# ── Custom SQLite functions ────────────────────────────────────────────────────
+
+def _split_part(string: Optional[str], delimiter: str, field_index: int) -> str:
+    """PostgreSQL SPLIT_PART equivalent for SQLite. Field index is 1-based."""
+    if string is None:
+        return ''
+    parts = string.split(delimiter)
+    idx = int(field_index)
+    if idx < 1 or idx > len(parts):
+        return ''
+    return parts[idx - 1]
+
+
 # ── SqliteConnection ───────────────────────────────────────────────────────────
 
 class SqliteConnection:
@@ -241,6 +254,7 @@ class SqliteConnection:
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
+        self._conn.create_function('SPLIT_PART', 3, _split_part)
         self._closed = False
 
     def cursor(self, cursor_factory=None):
