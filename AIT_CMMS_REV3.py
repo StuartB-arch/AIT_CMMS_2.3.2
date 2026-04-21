@@ -11128,8 +11128,9 @@ class AITCMMSSystem:
         for a different site's files and immediately re-syncs the database."""
         dialog = tk.Toplevel(self.root)
         dialog.title("Site Setup — CSV File Configuration")
-        dialog.geometry("640x440")
-        dialog.resizable(False, False)
+        dialog.geometry("780x460")
+        dialog.minsize(640, 420)
+        dialog.resizable(True, True)
         dialog.transient(self.root)
         dialog.grab_set()
 
@@ -11142,13 +11143,14 @@ class AITCMMSSystem:
         # ── Master Asset CSV ────────────────────────────────────────────────
         asset_frame = ttk.LabelFrame(dialog, text="Master Asset CSV  (PM_MASTER)", padding=10)
         asset_frame.pack(fill='x', padx=20, pady=6)
+        asset_frame.columnconfigure(1, weight=1)
 
         current_asset = getattr(self.csv_manager, 'path', None)
         asset_path_var = tk.StringVar(value=str(current_asset) if current_asset else "")
         replace_all_asset_var = tk.BooleanVar(value=False)
 
         ttk.Label(asset_frame, text="File:").grid(row=0, column=0, sticky='w')
-        ttk.Entry(asset_frame, textvariable=asset_path_var, width=48,
+        ttk.Entry(asset_frame, textvariable=asset_path_var,
                   state='readonly').grid(row=0, column=1, padx=6, sticky='ew')
         ttk.Button(asset_frame, text="Browse…", command=lambda: _browse(asset_path_var,
                    "Select Master Asset CSV")).grid(row=0, column=2, padx=(4, 0))
@@ -11166,6 +11168,7 @@ class AITCMMSSystem:
         # ── MRO Stock CSV ───────────────────────────────────────────────────
         mro_frame = ttk.LabelFrame(dialog, text="MRO Stock CSV  (MRO_STOCK)", padding=10)
         mro_frame.pack(fill='x', padx=20, pady=6)
+        mro_frame.columnconfigure(1, weight=1)
 
         mro_csv = (self.mro_manager.mro_csv
                    if hasattr(self, 'mro_manager') and hasattr(self.mro_manager, 'mro_csv')
@@ -11175,7 +11178,7 @@ class AITCMMSSystem:
         replace_all_mro_var = tk.BooleanVar(value=False)
 
         ttk.Label(mro_frame, text="File:").grid(row=0, column=0, sticky='w')
-        ttk.Entry(mro_frame, textvariable=mro_path_var, width=48,
+        ttk.Entry(mro_frame, textvariable=mro_path_var,
                   state='readonly').grid(row=0, column=1, padx=6, sticky='ew')
         ttk.Button(mro_frame, text="Browse…", command=lambda: _browse(mro_path_var,
                    "Select MRO Stock CSV")).grid(row=0, column=2, padx=(4, 0))
