@@ -215,7 +215,11 @@ class CSVManager:
                     next_monthly_pm    = EXCLUDED.next_monthly_pm,
                     next_six_month_pm  = EXCLUDED.next_six_month_pm,
                     next_annual_pm     = EXCLUDED.next_annual_pm,
-                    status             = EXCLUDED.status,
+                    status             = CASE
+                                             WHEN equipment.status IN ('Missing', 'Deactivated', 'Run to Failure')
+                                             THEN equipment.status
+                                             ELSE EXCLUDED.status
+                                         END,
                     updated_date       = CURRENT_TIMESTAMP
                 """,
                 rows,

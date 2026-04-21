@@ -1177,9 +1177,9 @@ class PMSchedulingService:
                     ROW_NUMBER() OVER (PARTITION BY bfm_equipment_no ORDER BY rowid) as rn
                 FROM equipment
                 WHERE (status = 'Active' OR status IS NULL)
-                AND status NOT IN ('Run to Failure', 'Missing')
+                AND status NOT IN ('Run to Failure', 'Missing', 'Deactivated', 'Inactive')
                 AND bfm_equipment_no NOT IN (
-                    SELECT DISTINCT bfm_equipment_no FROM cannot_find_assets WHERE status = 'Missing'
+                    SELECT DISTINCT bfm_equipment_no FROM cannot_find_assets
                 )
                 AND bfm_equipment_no NOT IN (
                     SELECT DISTINCT bfm_equipment_no FROM run_to_failure_assets
@@ -1283,29 +1283,34 @@ class PMSchedulingService:
 
         # --- 4. Assign each group to one technician and build insert batch ---
         batch_insert_data = []
-        fallback_tech_counter = 0  # for groups with no history
+        # Track asset count per technician this run so fallback groups distribute evenly
+        tech_asset_count: Dict[str, int] = {t: 0 for t in self.technicians}
+        # Normalised lookup: lowercase-stripped name → canonical name in self.technicians
+        tech_name_map: Dict[str, str] = {t.strip().lower(): t for t in self.technicians}
 
         for sap_key in sorted_keys:
             group = sap_groups[sap_key]
 
-            # Determine last technician for this SAP group (most common across BFMs in group)
+            # Determine last technician for this SAP group
             group_tech_history = [last_tech_per_bfm[b] for b in (a.bfm_no for a in group)
                                   if b in last_tech_per_bfm]
 
             if group_tech_history:
-                # Pick the tech who appeared most recently (first in list since we sorted DESC)
-                last_tech = group_tech_history[0]
-                if last_tech in self.technicians:
+                # Resolve stored name via normalised lookup (handles case/whitespace drift)
+                last_tech = tech_name_map.get(group_tech_history[0].strip().lower())
+                if last_tech is not None:
                     tech_idx = (self.technicians.index(last_tech) + 1) % len(self.technicians)
                 else:
-                    # Last tech no longer in active list — fall back to rotation
-                    tech_idx = fallback_tech_counter % len(self.technicians)
+                    # Last tech not in active list — assign to least-loaded tech
+                    tech_idx = min(range(len(self.technicians)),
+                                   key=lambda i: tech_asset_count[self.technicians[i]])
             else:
-                # No history for any BFM in this group
-                tech_idx = fallback_tech_counter % len(self.technicians)
+                # No history — assign to least-loaded tech for even distribution
+                tech_idx = min(range(len(self.technicians)),
+                               key=lambda i: tech_asset_count[self.technicians[i]])
 
-            fallback_tech_counter += 1
             technician = self.technicians[tech_idx]
+            tech_asset_count[technician] += len(group)
 
             # Spread assets within the group across weekdays
             for asset_idx, assignment in enumerate(group):
