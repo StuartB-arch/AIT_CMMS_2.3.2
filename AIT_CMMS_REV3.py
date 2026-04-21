@@ -11023,6 +11023,7 @@ class AITCMMSSystem:
             for label, cmd in [
                 ("👥  Manage Users",    self.open_user_management),
                 ("🗄  Database Backup", self.open_backup_manager),
+                ("⚙️  Setup",           self.show_setup_dialog),
             ]:
                 btn = tk.Button(toolbar_frame, text=label, command=cmd,
                                 bg="#dde6f0", fg=TEXT_PRI,
@@ -11121,6 +11122,118 @@ class AITCMMSSystem:
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open user management: {e}")
+
+    def show_setup_dialog(self):
+        """Site Setup — lets the manager swap the Master Asset CSV and MRO Stock CSV
+        for a different site's files and immediately re-syncs the database."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Site Setup — CSV File Configuration")
+        dialog.geometry("620x360")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        ttk.Label(dialog, text="Site Setup", font=('Segoe UI', 13, 'bold')).pack(pady=(16, 4))
+        ttk.Label(dialog, text="Select new CSV files to load data for a different site.\n"
+                               "The chosen file is copied into the application folder and the\n"
+                               "database is re-synced immediately.",
+                  justify='center').pack(pady=(0, 12))
+
+        # ── Master Asset CSV ────────────────────────────────────────────────
+        asset_frame = ttk.LabelFrame(dialog, text="Master Asset CSV  (PM_MASTER)", padding=10)
+        asset_frame.pack(fill='x', padx=20, pady=6)
+
+        current_asset = getattr(self.csv_manager, 'path', None)
+        asset_path_var = tk.StringVar(value=str(current_asset) if current_asset else "")
+
+        ttk.Label(asset_frame, text="File:").grid(row=0, column=0, sticky='w')
+        ttk.Entry(asset_frame, textvariable=asset_path_var, width=52,
+                  state='readonly').grid(row=0, column=1, padx=6, sticky='ew')
+
+        def browse_asset():
+            p = filedialog.askopenfilename(
+                parent=dialog, title="Select Master Asset CSV",
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+            if p:
+                asset_path_var.set(p)
+
+        def import_asset():
+            src = asset_path_var.get()
+            if not src or not os.path.isfile(src):
+                messagebox.showerror("Error", "Please select a valid CSV file.", parent=dialog)
+                return
+            import shutil
+            dest = self.csv_manager.path
+            try:
+                shutil.copy2(src, dest)
+                status_var.set("Syncing Master Asset CSV…")
+                dialog.update_idletasks()
+                result = self.csv_manager.startup_sync()
+                n = result.get('inserted', 0)
+                self.refresh_equipment_list()
+                self.update_status(f"Asset CSV imported: {n} records synced")
+                status_var.set(f"Done — {n} asset records synced.")
+            except Exception as exc:
+                messagebox.showerror("Import Error", str(exc), parent=dialog)
+
+        ttk.Button(asset_frame, text="Browse…", command=browse_asset).grid(
+            row=0, column=2, padx=(4, 0))
+        ttk.Button(asset_frame, text="Import & Sync", command=import_asset).grid(
+            row=1, column=1, pady=(8, 0), sticky='w', padx=6)
+
+        # ── MRO Stock CSV ───────────────────────────────────────────────────
+        mro_frame = ttk.LabelFrame(dialog, text="MRO Stock CSV  (MRO_STOCK)", padding=10)
+        mro_frame.pack(fill='x', padx=20, pady=6)
+
+        mro_csv = (self.mro_manager.mro_csv
+                   if hasattr(self, 'mro_manager') and hasattr(self.mro_manager, 'mro_csv')
+                   else None)
+        current_mro = getattr(mro_csv, 'path', None)
+        mro_path_var = tk.StringVar(value=str(current_mro) if current_mro else "")
+
+        ttk.Label(mro_frame, text="File:").grid(row=0, column=0, sticky='w')
+        ttk.Entry(mro_frame, textvariable=mro_path_var, width=52,
+                  state='readonly').grid(row=0, column=1, padx=6, sticky='ew')
+
+        def browse_mro():
+            p = filedialog.askopenfilename(
+                parent=dialog, title="Select MRO Stock CSV",
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+            if p:
+                mro_path_var.set(p)
+
+        def import_mro():
+            src = mro_path_var.get()
+            if not src or not os.path.isfile(src):
+                messagebox.showerror("Error", "Please select a valid CSV file.", parent=dialog)
+                return
+            if mro_csv is None:
+                messagebox.showerror("Error", "MRO manager not available.", parent=dialog)
+                return
+            import shutil
+            dest = mro_csv.path
+            try:
+                shutil.copy2(src, dest)
+                status_var.set("Syncing MRO Stock CSV…")
+                dialog.update_idletasks()
+                result = mro_csv.startup_sync()
+                n = result.get('upserted', 0)
+                if hasattr(self.mro_manager, 'refresh_mro_list'):
+                    self.mro_manager.refresh_mro_list()
+                self.update_status(f"MRO CSV imported: {n} parts synced")
+                status_var.set(f"Done — {n} MRO parts synced.")
+            except Exception as exc:
+                messagebox.showerror("Import Error", str(exc), parent=dialog)
+
+        ttk.Button(mro_frame, text="Browse…", command=browse_mro).grid(
+            row=0, column=2, padx=(4, 0))
+        ttk.Button(mro_frame, text="Import & Sync", command=import_mro).grid(
+            row=1, column=1, pady=(8, 0), sticky='w', padx=6)
+
+        # ── Status bar ──────────────────────────────────────────────────────
+        status_var = tk.StringVar(value="Ready")
+        ttk.Label(dialog, textvariable=status_var, foreground='gray').pack(pady=(8, 4))
+        ttk.Button(dialog, text="Close", command=dialog.destroy).pack(pady=(0, 12))
 
     def open_backup_manager(self):
         """Open database backup manager (Manager only)"""
