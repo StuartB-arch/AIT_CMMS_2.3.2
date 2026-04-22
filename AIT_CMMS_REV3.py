@@ -11829,14 +11829,14 @@ class AITCMMSSystem:
         exclusion_frame = ttk.LabelFrame(self.pm_schedule_frame, text="Exclude Technicians from This Week's Schedule", padding=10)
         exclusion_frame.pack(fill='x', padx=10, pady=5)
 
-        ttk.Label(exclusion_frame, text="Select technicians to exclude (e.g., vacation, out sick):").pack(anchor='w', pady=5)
+        ttk.Label(exclusion_frame, text="Excluded technicians (e.g. vacation, out sick) — right-click a name to remove:").pack(anchor='w', pady=5)
 
         # Create a frame for the listbox and scrollbar
         listbox_frame = ttk.Frame(exclusion_frame)
         listbox_frame.pack(fill='both', expand=False, pady=5)
 
-        # Create listbox with multiple selection
-        self.excluded_technicians_listbox = tk.Listbox(listbox_frame, selectmode='multiple', height=6, exportselection=False)
+        # Listbox shows only the excluded technicians (single-select for right-click targeting)
+        self.excluded_technicians_listbox = tk.Listbox(listbox_frame, selectmode='single', height=6, exportselection=False)
         self.excluded_technicians_listbox.pack(side='left', fill='both', expand=True)
 
         # Add scrollbar
@@ -11844,12 +11844,16 @@ class AITCMMSSystem:
         scrollbar.pack(side='right', fill='y')
         self.excluded_technicians_listbox.config(yscrollcommand=scrollbar.set)
 
-        # Populate the listbox with technicians
-        self.populate_technician_exclusion_list()
+        # Right-click to remove an exclusion
+        self.excluded_technicians_listbox.bind('<Button-3>', self.show_exclusion_context_menu)
+
+        # Starts empty — no one excluded by default
+        # self.populate_technician_exclusion_list() is kept for API compatibility but now just clears
 
         # Add helper buttons
         button_frame = ttk.Frame(exclusion_frame)
         button_frame.pack(fill='x', pady=5)
+        ttk.Button(button_frame, text="Add Technician", command=self.show_add_exclusion_dialog).pack(side='left', padx=5)
         ttk.Button(button_frame, text="Clear All Exclusions", command=self.clear_all_exclusions).pack(side='left', padx=5)
 
         # Weekly PM count summary
@@ -22782,27 +22786,83 @@ class AITCMMSSystem:
             traceback.print_exc()
 
     def populate_technician_exclusion_list(self):
-        """Populate the exclusion listbox with all technicians"""
+        """Clear the exclusion listbox — starts empty; techs are added explicitly via Add Technician."""
         if hasattr(self, 'excluded_technicians_listbox'):
             self.excluded_technicians_listbox.delete(0, tk.END)
-            for tech in self.technicians:
-                self.excluded_technicians_listbox.insert(tk.END, tech)
 
     def clear_all_exclusions(self):
-        """Clear all technician exclusions"""
+        """Remove all technicians from the exclusion list."""
         if hasattr(self, 'excluded_technicians_listbox'):
-            self.excluded_technicians_listbox.selection_clear(0, tk.END)
+            self.excluded_technicians_listbox.delete(0, tk.END)
 
     def get_excluded_technicians(self):
-        """Get list of excluded technicians based on listbox selection"""
+        """Return every technician currently in the exclusion listbox."""
         if not hasattr(self, 'excluded_technicians_listbox'):
             return []
+        return [self.excluded_technicians_listbox.get(i)
+                for i in range(self.excluded_technicians_listbox.size())]
 
-        excluded = []
-        selected_indices = self.excluded_technicians_listbox.curselection()
-        for idx in selected_indices:
-            excluded.append(self.excluded_technicians_listbox.get(idx))
-        return excluded
+    def show_exclusion_context_menu(self, event):
+        """Right-click context menu on the exclusion listbox to remove a technician."""
+        lb = self.excluded_technicians_listbox
+        idx = lb.nearest(event.y)
+        if idx < 0 or idx >= lb.size():
+            return
+        lb.selection_clear(0, tk.END)
+        lb.selection_set(idx)
+        tech_name = lb.get(idx)
+        menu = tk.Menu(self.root, tearoff=0)
+        menu.add_command(
+            label=f"Remove \"{tech_name}\" from exclusions",
+            command=lambda: lb.delete(idx)
+        )
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def show_add_exclusion_dialog(self):
+        """Dialog to pick a technician and add them to the exclusion list."""
+        currently_excluded = set(self.get_excluded_technicians())
+        available = [t for t in self.technicians if t not in currently_excluded]
+
+        if not available:
+            messagebox.showinfo("All Excluded",
+                "All technicians are already excluded from this week's schedule.")
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Exclude a Technician")
+        dialog.geometry("300x360")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        ttk.Label(dialog, text="Select technician to exclude:").pack(pady=(12, 4), padx=12, anchor='w')
+
+        lb_frame = ttk.Frame(dialog)
+        lb_frame.pack(fill='both', expand=True, padx=12)
+
+        lb = tk.Listbox(lb_frame, selectmode='single', height=12)
+        lb.pack(side='left', fill='both', expand=True)
+        sb = ttk.Scrollbar(lb_frame, orient='vertical', command=lb.yview)
+        sb.pack(side='right', fill='y')
+        lb.config(yscrollcommand=sb.set)
+
+        for tech in available:
+            lb.insert(tk.END, tech)
+
+        def confirm():
+            sel = lb.curselection()
+            if not sel:
+                messagebox.showwarning("No Selection", "Please select a technician.", parent=dialog)
+                return
+            self.excluded_technicians_listbox.insert(tk.END, lb.get(sel[0]))
+            dialog.destroy()
+
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(fill='x', pady=10, padx=12)
+        ttk.Button(btn_frame, text="Exclude Technician", command=confirm).pack(side='left', padx=(0, 5))
+        ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side='left')
+
+        lb.bind('<Double-Button-1>', lambda e: confirm())
 
 
     def refresh_technician_schedules(self):
