@@ -11158,6 +11158,169 @@ class AITCMMSSystem:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open user management: {e}")
 
+    def open_technician_manager(self):
+        """Focused dialog for adding and deleting technicians."""
+        from database_utils import db_pool, UserManager, AuditLogger
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Manage Technicians")
+        dialog.geometry("480x420")
+        dialog.resizable(True, True)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        ttk.Label(dialog, text="Technicians", font=('TkDefaultFont', 12, 'bold')).pack(pady=(12, 4))
+        ttk.Label(dialog, text="Right-click a technician to delete them.").pack(pady=(0, 8))
+
+        # --- treeview ---
+        tree_frame = ttk.Frame(dialog)
+        tree_frame.pack(fill='both', expand=True, padx=12)
+
+        tree = ttk.Treeview(tree_frame, columns=('Name', 'Username', 'Active'), show='headings')
+        tree.heading('Name', text='Full Name')
+        tree.heading('Username', text='Username')
+        tree.heading('Active', text='Active')
+        tree.column('Name', width=200)
+        tree.column('Username', width=130)
+        tree.column('Active', width=60, anchor='center')
+
+        sb = ttk.Scrollbar(tree_frame, orient='vertical', command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        tree.pack(side='left', fill='both', expand=True)
+        sb.pack(side='right', fill='y')
+
+        def load():
+            for row in tree.get_children():
+                tree.delete(row)
+            try:
+                with db_pool.get_cursor() as cur:
+                    cur.execute("""
+                        SELECT id, full_name, username, is_active
+                        FROM users
+                        WHERE role = 'Technician'
+                        ORDER BY full_name
+                    """)
+                    for r in cur.fetchall():
+                        tree.insert('', 'end', iid=str(r['id']),
+                                    values=(r['full_name'], r['username'],
+                                            'Yes' if r['is_active'] else 'No'))
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not load technicians: {e}", parent=dialog)
+
+        def delete_tech():
+            sel = tree.selection()
+            if not sel:
+                return
+            user_id = int(sel[0])
+            name = tree.item(sel[0])['values'][0]
+            username = tree.item(sel[0])['values'][1]
+            if not messagebox.askyesno(
+                "Delete Technician",
+                f"Delete technician \"{name}\"?\n\nThis cannot be undone.",
+                parent=dialog, icon='warning'
+            ):
+                return
+            try:
+                with db_pool.get_cursor() as cur:
+                    AuditLogger.log(cur, self.user_name, 'DELETE', 'users', str(user_id),
+                                    notes=f"Deleted technician: {name}")
+                    cur.execute("DELETE FROM user_sessions WHERE user_id = %s", (user_id,))
+                    cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
+                load()
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not delete technician: {e}", parent=dialog)
+
+        def on_right_click(event):
+            iid = tree.identify_row(event.y)
+            if not iid:
+                return
+            tree.selection_set(iid)
+            name = tree.item(iid)['values'][0]
+            menu = tk.Menu(dialog, tearoff=0)
+            menu.add_command(label=f'Delete "{name}"', command=delete_tech)
+            menu.tk_popup(event.x_root, event.y_root)
+
+        tree.bind('<Button-3>', on_right_click)
+
+        # --- Add Technician form ---
+        def show_add_form():
+            add_win = tk.Toplevel(dialog)
+            add_win.title("Add Technician")
+            add_win.geometry("340x280")
+            add_win.resizable(False, False)
+            add_win.transient(dialog)
+            add_win.grab_set()
+
+            form = ttk.Frame(add_win, padding=16)
+            form.pack(fill='both', expand=True)
+
+            ttk.Label(form, text="Full Name:").grid(row=0, column=0, sticky='w', pady=6)
+            name_var = tk.StringVar()
+            ttk.Entry(form, textvariable=name_var, width=26).grid(row=0, column=1, pady=6)
+
+            ttk.Label(form, text="Username:").grid(row=1, column=0, sticky='w', pady=6)
+            user_var = tk.StringVar()
+            ttk.Entry(form, textvariable=user_var, width=26).grid(row=1, column=1, pady=6)
+
+            ttk.Label(form, text="Password:").grid(row=2, column=0, sticky='w', pady=6)
+            pw_var = tk.StringVar()
+            ttk.Entry(form, textvariable=pw_var, show='*', width=26).grid(row=2, column=1, pady=6)
+
+            ttk.Label(form, text="Confirm:").grid(row=3, column=0, sticky='w', pady=6)
+            pw2_var = tk.StringVar()
+            ttk.Entry(form, textvariable=pw2_var, show='*', width=26).grid(row=3, column=1, pady=6)
+
+            def save():
+                fullname = name_var.get().strip()
+                username = user_var.get().strip()
+                pw = pw_var.get()
+                pw2 = pw2_var.get()
+                if not fullname or not username or not pw:
+                    messagebox.showerror("Error", "All fields are required.", parent=add_win)
+                    return
+                if pw != pw2:
+                    messagebox.showerror("Error", "Passwords do not match.", parent=add_win)
+                    return
+                if len(pw) < 4:
+                    messagebox.showerror("Error", "Password must be at least 4 characters.", parent=add_win)
+                    return
+                try:
+                    with db_pool.get_cursor() as cur:
+                        cur.execute("SELECT id FROM users WHERE username = %s", (username,))
+                        if cur.fetchone():
+                            messagebox.showerror("Error", "Username already exists.", parent=add_win)
+                            return
+                        ph = UserManager.hash_password(pw)
+                        cur.execute("""
+                            INSERT INTO users (username, password_hash, full_name, role, created_by)
+                            VALUES (%s, %s, %s, 'Technician', %s)
+                        """, (username, ph, fullname, self.user_name))
+                        AuditLogger.log(cur, self.user_name, 'INSERT', 'users', username,
+                                        notes=f"Added technician: {fullname}")
+                    add_win.destroy()
+                    load()
+                except Exception as e:
+                    messagebox.showerror("Error", f"Could not add technician: {e}", parent=add_win)
+
+            bf = ttk.Frame(add_win)
+            bf.pack(fill='x', padx=16, pady=(0, 12))
+            ttk.Button(bf, text="Add Technician", command=save).pack(side='left', padx=(0, 6))
+            ttk.Button(bf, text="Cancel", command=add_win.destroy).pack(side='left')
+
+        # --- bottom buttons ---
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(fill='x', padx=12, pady=10)
+        ttk.Button(btn_frame, text="Add Technician", command=show_add_form).pack(side='left', padx=(0, 6))
+
+        def _close():
+            dialog.destroy()
+            self.load_technicians_from_database()
+
+        dialog.protocol("WM_DELETE_WINDOW", _close)
+        ttk.Button(btn_frame, text="Close", command=_close).pack(side='right')
+
+        load()
+
     def show_setup_dialog(self):
         """Site Setup — lets the manager swap the Master Asset CSV and MRO Stock CSV
         for a different site's files and immediately re-syncs the database."""
@@ -11824,19 +11987,21 @@ class AITCMMSSystem:
                   command=self.export_weekly_schedule).grid(row=0, column=4, padx=5)
         ttk.Button(controls_frame, text="Mark as Cannot Find",
                   command=self.mark_pm_cannot_find).grid(row=0, column=5, padx=5)
+        ttk.Button(controls_frame, text="Manage Technicians",
+                  command=self.open_technician_manager).grid(row=1, column=2, padx=5, pady=(4, 0))
 
         # Technician Exclusion Controls
         exclusion_frame = ttk.LabelFrame(self.pm_schedule_frame, text="Exclude Technicians from This Week's Schedule", padding=10)
         exclusion_frame.pack(fill='x', padx=10, pady=5)
 
-        ttk.Label(exclusion_frame, text="Excluded technicians (e.g. vacation, out sick) — right-click a name to remove:").pack(anchor='w', pady=5)
+        ttk.Label(exclusion_frame, text="Select technicians to exclude (e.g., vacation, out sick):").pack(anchor='w', pady=5)
 
         # Create a frame for the listbox and scrollbar
         listbox_frame = ttk.Frame(exclusion_frame)
         listbox_frame.pack(fill='both', expand=False, pady=5)
 
-        # Listbox shows only the excluded technicians (single-select for right-click targeting)
-        self.excluded_technicians_listbox = tk.Listbox(listbox_frame, selectmode='single', height=6, exportselection=False)
+        # Create listbox with multiple selection
+        self.excluded_technicians_listbox = tk.Listbox(listbox_frame, selectmode='multiple', height=6, exportselection=False)
         self.excluded_technicians_listbox.pack(side='left', fill='both', expand=True)
 
         # Add scrollbar
@@ -11844,16 +12009,12 @@ class AITCMMSSystem:
         scrollbar.pack(side='right', fill='y')
         self.excluded_technicians_listbox.config(yscrollcommand=scrollbar.set)
 
-        # Right-click to remove an exclusion
-        self.excluded_technicians_listbox.bind('<Button-3>', self.show_exclusion_context_menu)
-
-        # Starts empty — no one excluded by default
-        # self.populate_technician_exclusion_list() is kept for API compatibility but now just clears
+        # Populate the listbox with technicians
+        self.populate_technician_exclusion_list()
 
         # Add helper buttons
         button_frame = ttk.Frame(exclusion_frame)
         button_frame.pack(fill='x', pady=5)
-        ttk.Button(button_frame, text="Add Technician", command=self.show_add_exclusion_dialog).pack(side='left', padx=5)
         ttk.Button(button_frame, text="Clear All Exclusions", command=self.clear_all_exclusions).pack(side='left', padx=5)
 
         # Weekly PM count summary
@@ -22786,83 +22947,27 @@ class AITCMMSSystem:
             traceback.print_exc()
 
     def populate_technician_exclusion_list(self):
-        """Clear the exclusion listbox — starts empty; techs are added explicitly via Add Technician."""
+        """Populate the exclusion listbox with all technicians"""
         if hasattr(self, 'excluded_technicians_listbox'):
             self.excluded_technicians_listbox.delete(0, tk.END)
+            for tech in self.technicians:
+                self.excluded_technicians_listbox.insert(tk.END, tech)
 
     def clear_all_exclusions(self):
-        """Remove all technicians from the exclusion list."""
+        """Clear all technician exclusions"""
         if hasattr(self, 'excluded_technicians_listbox'):
-            self.excluded_technicians_listbox.delete(0, tk.END)
+            self.excluded_technicians_listbox.selection_clear(0, tk.END)
 
     def get_excluded_technicians(self):
-        """Return every technician currently in the exclusion listbox."""
+        """Get list of excluded technicians based on listbox selection"""
         if not hasattr(self, 'excluded_technicians_listbox'):
             return []
-        return [self.excluded_technicians_listbox.get(i)
-                for i in range(self.excluded_technicians_listbox.size())]
 
-    def show_exclusion_context_menu(self, event):
-        """Right-click context menu on the exclusion listbox to remove a technician."""
-        lb = self.excluded_technicians_listbox
-        idx = lb.nearest(event.y)
-        if idx < 0 or idx >= lb.size():
-            return
-        lb.selection_clear(0, tk.END)
-        lb.selection_set(idx)
-        tech_name = lb.get(idx)
-        menu = tk.Menu(self.root, tearoff=0)
-        menu.add_command(
-            label=f"Remove \"{tech_name}\" from exclusions",
-            command=lambda: lb.delete(idx)
-        )
-        menu.tk_popup(event.x_root, event.y_root)
-
-    def show_add_exclusion_dialog(self):
-        """Dialog to pick a technician and add them to the exclusion list."""
-        currently_excluded = set(self.get_excluded_technicians())
-        available = [t for t in self.technicians if t not in currently_excluded]
-
-        if not available:
-            messagebox.showinfo("All Excluded",
-                "All technicians are already excluded from this week's schedule.")
-            return
-
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Exclude a Technician")
-        dialog.geometry("300x360")
-        dialog.resizable(False, False)
-        dialog.transient(self.root)
-        dialog.grab_set()
-
-        ttk.Label(dialog, text="Select technician to exclude:").pack(pady=(12, 4), padx=12, anchor='w')
-
-        lb_frame = ttk.Frame(dialog)
-        lb_frame.pack(fill='both', expand=True, padx=12)
-
-        lb = tk.Listbox(lb_frame, selectmode='single', height=12)
-        lb.pack(side='left', fill='both', expand=True)
-        sb = ttk.Scrollbar(lb_frame, orient='vertical', command=lb.yview)
-        sb.pack(side='right', fill='y')
-        lb.config(yscrollcommand=sb.set)
-
-        for tech in available:
-            lb.insert(tk.END, tech)
-
-        def confirm():
-            sel = lb.curselection()
-            if not sel:
-                messagebox.showwarning("No Selection", "Please select a technician.", parent=dialog)
-                return
-            self.excluded_technicians_listbox.insert(tk.END, lb.get(sel[0]))
-            dialog.destroy()
-
-        btn_frame = ttk.Frame(dialog)
-        btn_frame.pack(fill='x', pady=10, padx=12)
-        ttk.Button(btn_frame, text="Exclude Technician", command=confirm).pack(side='left', padx=(0, 5))
-        ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side='left')
-
-        lb.bind('<Double-Button-1>', lambda e: confirm())
+        excluded = []
+        selected_indices = self.excluded_technicians_listbox.curselection()
+        for idx in selected_indices:
+            excluded.append(self.excluded_technicians_listbox.get(idx))
+        return excluded
 
 
     def refresh_technician_schedules(self):
