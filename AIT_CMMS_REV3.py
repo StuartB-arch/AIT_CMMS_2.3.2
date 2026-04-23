@@ -11132,13 +11132,11 @@ class AITCMMSSystem:
         self.create_equipment_tab()
         self.create_pm_scheduling_tab()
         self.create_pm_completion_tab()
-        self.create_cm_management_tab()
         #self.create_analytics_dashboard_tab()
         self.create_cannot_find_tab()
         self.create_deactivated_tab()
         self.create_custom_pm_templates_tab()
         self.mro_manager.create_mro_tab(self.notebook)
-        self.manuals_manager.create_manuals_tab(self.notebook)
 
 
     def open_user_management(self):
