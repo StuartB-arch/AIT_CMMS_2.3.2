@@ -14889,6 +14889,8 @@ class AITCMMSSystem:
     # Enhanced load_corrective_maintenance to show source
     def load_corrective_maintenance(self):
         """Load corrective maintenance data with enhanced source tracking"""
+        if not hasattr(self, 'cm_tree'):
+            return
         try:
             cursor = self.conn.cursor()
 
@@ -14943,6 +14945,8 @@ class AITCMMSSystem:
 
     def load_missing_parts_list(self):
         """Load equipment missing parts data with status feedback"""
+        if not hasattr(self, 'emp_tree'):
+            return
         try:
             cursor = self.conn.cursor()
 
@@ -18607,10 +18611,12 @@ class AITCMMSSystem:
     
     def load_corrective_maintenance(self):
         """Load corrective maintenance data"""
+        if not hasattr(self, 'cm_tree'):
+            return
         try:
             cursor = self.conn.cursor()
             cursor.execute('''
-                SELECT cm_number, bfm_equipment_no, description, priority, 
+                SELECT cm_number, bfm_equipment_no, description, priority,
                        assigned_technician, status, created_date
                 FROM corrective_maintenance 
                 ORDER BY created_date DESC
