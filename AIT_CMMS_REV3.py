@@ -6143,21 +6143,32 @@ class AITCMMSSystem:
             cursor = self.conn.cursor()
             today_str = datetime.now().date().strftime('%Y-%m-%d')
 
+            # Current week start (Monday) — always check this week's schedule first
+            today_date = datetime.now().date()
+            current_week_start = (today_date - timedelta(days=today_date.weekday())).strftime('%Y-%m-%d')
+
             if not pm_type:
                 # BFM entered but no PM type yet.
-                # Look for the closest upcoming (or most recently scheduled) entry
-                # across ALL weeks so Monthly/Six Month/Annual PMs are found too.
+                # First look for this week's scheduled entry, then fall back to most recent.
                 cursor.execute('''
                     SELECT pm_type, assigned_technician, scheduled_date, week_start_date
                     FROM weekly_pm_schedules
                     WHERE bfm_equipment_no = %s AND status = 'Scheduled'
-                    ORDER BY
-                        CASE WHEN COALESCE(week_start_date, scheduled_date)::date <= %s::date THEN 0 ELSE 1 END ASC,
-                        ABS(COALESCE(week_start_date, scheduled_date)::date - %s::date) ASC
+                      AND week_start_date = %s
                     LIMIT 1
-                ''', (bfm_no, today_str, today_str))
-
+                ''', (bfm_no, current_week_start))
                 schedule_result = cursor.fetchone()
+
+                if not schedule_result:
+                    # Fall back to most recent scheduled entry across all weeks
+                    cursor.execute('''
+                        SELECT pm_type, assigned_technician, scheduled_date, week_start_date
+                        FROM weekly_pm_schedules
+                        WHERE bfm_equipment_no = %s AND status = 'Scheduled'
+                        ORDER BY week_start_date DESC
+                        LIMIT 1
+                    ''', (bfm_no,))
+                    schedule_result = cursor.fetchone()
 
                 if schedule_result:
                     sched_pm_type, sched_technician, sched_date, sched_week = schedule_result
@@ -6213,18 +6224,26 @@ class AITCMMSSystem:
                                 f"Auto-filled from equipment record: {best_type} PM due {best_due}"
                             )
             else:
-                # Both BFM and PM type are set — look for any matching scheduled entry
+                # Both BFM and PM type are set — check this week first, then fall back.
                 cursor.execute('''
                     SELECT assigned_technician, scheduled_date, week_start_date
                     FROM weekly_pm_schedules
                     WHERE bfm_equipment_no = %s AND pm_type = %s AND status = 'Scheduled'
-                    ORDER BY
-                        CASE WHEN COALESCE(week_start_date, scheduled_date)::date <= %s::date THEN 0 ELSE 1 END ASC,
-                        ABS(COALESCE(week_start_date, scheduled_date)::date - %s::date) ASC
+                      AND week_start_date = %s
                     LIMIT 1
-                ''', (bfm_no, pm_type, today_str, today_str))
-
+                ''', (bfm_no, pm_type, current_week_start))
                 schedule_result = cursor.fetchone()
+
+                if not schedule_result:
+                    # Fall back to most recent scheduled entry across all weeks
+                    cursor.execute('''
+                        SELECT assigned_technician, scheduled_date, week_start_date
+                        FROM weekly_pm_schedules
+                        WHERE bfm_equipment_no = %s AND pm_type = %s AND status = 'Scheduled'
+                        ORDER BY week_start_date DESC
+                        LIMIT 1
+                    ''', (bfm_no, pm_type))
+                    schedule_result = cursor.fetchone()
 
                 if schedule_result:
                     sched_technician, sched_date, sched_week = schedule_result
@@ -7349,6 +7368,46 @@ class AITCMMSSystem:
         if hasattr(self, 'excluded_technicians_listbox'):
             self.populate_technician_exclusion_list()
 
+        # Rebuild the Weekly PM Schedule technician tabs if the UI is ready
+        if hasattr(self, 'technician_notebook'):
+            self.rebuild_technician_notebook()
+
+    def rebuild_technician_notebook(self):
+        """Destroy and recreate all technician tabs in the Weekly PM Schedule view.
+
+        Called after technicians are added or removed so the tab list always
+        matches the current active technician roster.
+        """
+        if not hasattr(self, 'technician_notebook') or not hasattr(self, 'technician_trees'):
+            return
+
+        # Remove every existing tab
+        for tab_id in list(self.technician_notebook.tabs()):
+            self.technician_notebook.forget(tab_id)
+        self.technician_trees = {}
+
+        # Recreate one tab per active technician
+        for tech in self.technicians:
+            tech_frame = ttk.Frame(self.technician_notebook)
+            self.technician_notebook.add(tech_frame, text=tech)
+            tech_tree = ttk.Treeview(
+                tech_frame,
+                columns=('BFM', 'Description', 'PM Type', 'Due Date', 'Status'),
+                show='headings'
+            )
+            tech_tree.heading('BFM', text='BFM Equipment No.')
+            tech_tree.heading('Description', text='Description')
+            tech_tree.heading('PM Type', text='PM Type')
+            tech_tree.heading('Due Date', text='Due Date')
+            tech_tree.heading('Status', text='Status')
+            for col in ('BFM', 'Description', 'PM Type', 'Due Date', 'Status'):
+                tech_tree.column(col, width=150)
+            tech_tree.pack(fill='both', expand=True, padx=5, pady=5)
+            self.technician_trees[tech] = tech_tree
+
+        # Repopulate with the current week's schedule
+        if hasattr(self, 'week_start_var'):
+            self.refresh_technician_schedules()
 
     def get_week_start(self, date):
         """Get the start of the week (Monday) for a given date"""
@@ -9082,21 +9141,32 @@ class AITCMMSSystem:
             cursor = self.conn.cursor()
             today_str = datetime.now().date().strftime('%Y-%m-%d')
 
+            # Current week start (Monday) — always check this week's schedule first
+            today_date = datetime.now().date()
+            current_week_start = (today_date - timedelta(days=today_date.weekday())).strftime('%Y-%m-%d')
+
             if not pm_type:
                 # BFM entered but no PM type yet.
-                # Look for the closest upcoming (or most recently scheduled) entry
-                # across ALL weeks so Monthly/Six Month/Annual PMs are found too.
+                # First look for this week's scheduled entry, then fall back to most recent.
                 cursor.execute('''
                     SELECT pm_type, assigned_technician, scheduled_date, week_start_date
                     FROM weekly_pm_schedules
                     WHERE bfm_equipment_no = %s AND status = 'Scheduled'
-                    ORDER BY
-                        CASE WHEN COALESCE(week_start_date, scheduled_date)::date <= %s::date THEN 0 ELSE 1 END ASC,
-                        ABS(COALESCE(week_start_date, scheduled_date)::date - %s::date) ASC
+                      AND week_start_date = %s
                     LIMIT 1
-                ''', (bfm_no, today_str, today_str))
-
+                ''', (bfm_no, current_week_start))
                 schedule_result = cursor.fetchone()
+
+                if not schedule_result:
+                    # Fall back to most recent scheduled entry across all weeks
+                    cursor.execute('''
+                        SELECT pm_type, assigned_technician, scheduled_date, week_start_date
+                        FROM weekly_pm_schedules
+                        WHERE bfm_equipment_no = %s AND status = 'Scheduled'
+                        ORDER BY week_start_date DESC
+                        LIMIT 1
+                    ''', (bfm_no,))
+                    schedule_result = cursor.fetchone()
 
                 if schedule_result:
                     sched_pm_type, sched_technician, sched_date, sched_week = schedule_result
@@ -9152,18 +9222,26 @@ class AITCMMSSystem:
                                 f"Auto-filled from equipment record: {best_type} PM due {best_due}"
                             )
             else:
-                # Both BFM and PM type are set — look for any matching scheduled entry
+                # Both BFM and PM type are set — check this week first, then fall back.
                 cursor.execute('''
                     SELECT assigned_technician, scheduled_date, week_start_date
                     FROM weekly_pm_schedules
                     WHERE bfm_equipment_no = %s AND pm_type = %s AND status = 'Scheduled'
-                    ORDER BY
-                        CASE WHEN COALESCE(week_start_date, scheduled_date)::date <= %s::date THEN 0 ELSE 1 END ASC,
-                        ABS(COALESCE(week_start_date, scheduled_date)::date - %s::date) ASC
+                      AND week_start_date = %s
                     LIMIT 1
-                ''', (bfm_no, pm_type, today_str, today_str))
-
+                ''', (bfm_no, pm_type, current_week_start))
                 schedule_result = cursor.fetchone()
+
+                if not schedule_result:
+                    # Fall back to most recent scheduled entry across all weeks
+                    cursor.execute('''
+                        SELECT assigned_technician, scheduled_date, week_start_date
+                        FROM weekly_pm_schedules
+                        WHERE bfm_equipment_no = %s AND pm_type = %s AND status = 'Scheduled'
+                        ORDER BY week_start_date DESC
+                        LIMIT 1
+                    ''', (bfm_no, pm_type))
+                    schedule_result = cursor.fetchone()
 
                 if schedule_result:
                     sched_technician, sched_date, sched_week = schedule_result
@@ -10388,6 +10466,41 @@ class AITCMMSSystem:
                                     notes=f"Deleted technician: {name}")
                     cur.execute("DELETE FROM user_sessions WHERE user_id = %s", (user_id,))
                     cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
+
+                # Reassign this technician's scheduled PMs (current week onwards) to
+                # remaining active technicians using round-robin distribution.
+                try:
+                    today_date = datetime.now().date()
+                    current_week_start = (today_date - timedelta(days=today_date.weekday())).strftime('%Y-%m-%d')
+                    with db_pool.get_cursor() as cur2:
+                        cur2.execute("""
+                            SELECT full_name FROM users
+                            WHERE role = 'Technician' AND is_active = TRUE
+                            ORDER BY full_name
+                        """)
+                        remaining_techs = [r['full_name'] for r in cur2.fetchall()]
+
+                        if remaining_techs:
+                            cur2.execute("""
+                                SELECT id FROM weekly_pm_schedules
+                                WHERE assigned_technician = %s
+                                  AND week_start_date >= %s
+                                  AND status = 'Scheduled'
+                                ORDER BY week_start_date, id
+                            """, (name, current_week_start))
+                            ids_to_reassign = [r['id'] for r in cur2.fetchall()]
+
+                            for i, pm_id in enumerate(ids_to_reassign):
+                                new_tech = remaining_techs[i % len(remaining_techs)]
+                                cur2.execute(
+                                    "UPDATE weekly_pm_schedules SET assigned_technician = %s WHERE id = %s",
+                                    (new_tech, pm_id)
+                                )
+                            if ids_to_reassign:
+                                print(f"Reassigned {len(ids_to_reassign)} scheduled PMs from {name} to remaining technicians")
+                except Exception as reassign_err:
+                    print(f"Warning: Could not reassign PMs for deleted technician: {reassign_err}")
+
                 load()
             except Exception as e:
                 messagebox.showerror("Error", f"Could not delete technician: {e}", parent=dialog)
