@@ -3,6 +3,11 @@
 AIT Complete CMMS - Computerized Maintenance Management System
 Fully functional CMMS with automatic PM scheduling, technician assignment, and comprehensive reporting
 """
+import shutil, pathlib
+_here = pathlib.Path(__file__).parent
+_cache = _here / "__pycache__"
+if _cache.exists():
+    shutil.rmtree(_cache, ignore_errors=True)
 from datetime import datetime, timedelta
 from mro_stock_module import MROStockManager
 from cm_parts_integration import CMPartsIntegration
