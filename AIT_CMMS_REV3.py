@@ -1529,21 +1529,15 @@ class DateStandardizer:
 
 def generate_monthly_summary_report(conn, month=None, year=None):
     """
-    Generate a comprehensive monthly PM summary report with separate tracking
-    for PM Completions, Cannot Find, Run to Failure entries, and CM statistics
-
-    Args:
-        conn: Database connection
-        month: Month number (1-12), defaults to current month
-        year: Year (YYYY), defaults to current year
+    Generate a monthly PM summary report covering PM completions, Cannot Find,
+    Run to Failure, and Deactivated assets.
+    Corrective Maintenance is not used at this site and is excluded.
     """
-    # Debug logging to desktop
     import traceback
     import os
     log_file = os.path.expanduser("~/Desktop/monthly_report_debug.log")
 
     def log_debug(message):
-        """Write debug message to log file"""
         try:
             with open(log_file, 'a') as f:
                 from datetime import datetime as dt
@@ -1553,39 +1547,25 @@ def generate_monthly_summary_report(conn, month=None, year=None):
             pass
 
     try:
-        log_debug("="*80)
-        log_debug(f"STARTING REPORT GENERATION: month={month} ({type(month).__name__}), year={year} ({type(year).__name__})")
+        log_debug("=" * 80)
+        log_debug(f"STARTING REPORT: month={month}, year={year}")
 
-        # Rollback any failed transaction before starting
         try:
             conn.rollback()
-            log_debug("Database connection rollback successful")
-        except Exception as e:
-            log_debug(f"Rollback exception (ignored): {e}")
-            pass  # Ignore if there's no transaction to rollback
+        except Exception:
+            pass
 
         cursor = conn.cursor()
-        log_debug("Cursor created successfully")
 
-        # Use current month/year if not specified
         if month is None or year is None:
             now = datetime.now()
             month = month or now.month
             year = year or now.year
-        log_debug(f"After defaults: month={month}, year={year}")
 
-        # Ensure month and year are integers
         month = int(month)
         year = int(year)
-        log_debug(f"After int conversion: month={month}, year={year}")
-
         month_name = calendar.month_name[month]
-        log_debug(f"Month name: {month_name}")
-    
-        # Calculate date range for the month
-        first_day = f"{year}-{month:02d}-01"
-        last_day = f"{year}-{month:02d}-{calendar.monthrange(year, month)[1]}"
-    
+
         print("=" * 80)
         print(f"MONTHLY PM SUMMARY REPORT")
         print(f"Month: {month_name} {year}")
@@ -1593,21 +1573,19 @@ def generate_monthly_summary_report(conn, month=None, year=None):
         print("=" * 80)
         print()
     
-        # 1. OVERALL MONTHLY SUMMARY - PM COMPLETIONS ONLY
-        # Get PM completions count - ONLY for PMs assigned AND completed in the same month
-        # EXCLUDE special types: Cannot Find, Run to Failure
+        # 1. PM COMPLETIONS — assigned AND completed this month
         cursor.execute('''
             SELECT
                 COUNT(*) as total_completions,
                 SUM(labor_hours + labor_minutes/60.0) as total_hours,
                 AVG(labor_hours + labor_minutes/60.0) as avg_hours
             FROM pm_completions
-            WHERE EXTRACT(YEAR FROM completion_date::date) = %s
-            AND EXTRACT(MONTH FROM completion_date::date) = %s
+            WHERE EXTRACT(YEAR FROM completion_date) = %s
+            AND EXTRACT(MONTH FROM completion_date) = %s
             AND pm_due_date IS NOT NULL
             AND pm_due_date != ''
-            AND EXTRACT(YEAR FROM pm_due_date::date) = %s
-            AND EXTRACT(MONTH FROM pm_due_date::date) = %s
+            AND EXTRACT(YEAR FROM pm_due_date) = %s
+            AND EXTRACT(MONTH FROM pm_due_date) = %s
             AND pm_type NOT IN ('CANNOT FIND', 'Cannot Find', 'Run to Failure', 'RTF')
         ''', (year, month, year, month))
 
@@ -1616,22 +1594,20 @@ def generate_monthly_summary_report(conn, month=None, year=None):
         pm_total_hours = pm_results[1] or 0.0
         pm_avg_hours = pm_results[2] or 0.0
 
-        # Get PMs assigned BEFORE this month but completed this month (Outstanding Completions)
-        # This includes PMs with different due dates OR NULL/empty due dates
-        # EXCLUDE special types: Cannot Find, Run to Failure
+        # Outstanding — assigned before this month but completed this month
         cursor.execute('''
             SELECT
                 COUNT(*) as total_completions,
                 SUM(labor_hours + labor_minutes/60.0) as total_hours,
                 AVG(labor_hours + labor_minutes/60.0) as avg_hours
             FROM pm_completions
-            WHERE EXTRACT(YEAR FROM completion_date::date) = %s
-            AND EXTRACT(MONTH FROM completion_date::date) = %s
+            WHERE EXTRACT(YEAR FROM completion_date) = %s
+            AND EXTRACT(MONTH FROM completion_date) = %s
             AND (
                 pm_due_date IS NULL
                 OR pm_due_date = ''
-                OR EXTRACT(YEAR FROM pm_due_date::date) != %s
-                OR EXTRACT(MONTH FROM pm_due_date::date) != %s
+                OR EXTRACT(YEAR FROM pm_due_date) != %s
+                OR EXTRACT(MONTH FROM pm_due_date) != %s
             )
             AND pm_type NOT IN ('CANNOT FIND', 'Cannot Find', 'Run to Failure', 'RTF')
         ''', (year, month, year, month))
@@ -1641,544 +1617,66 @@ def generate_monthly_summary_report(conn, month=None, year=None):
         outstanding_total_hours = outstanding_results[1] or 0.0
         outstanding_avg_hours = outstanding_results[2] or 0.0
     
-        # Get Cannot Find entries count (separate) - using DISTINCT to match tab behavior
+        # Cannot Find
         cursor.execute('''
             SELECT COUNT(DISTINCT bfm_equipment_no)
             FROM cannot_find_assets
-            WHERE EXTRACT(YEAR FROM reported_date::date) = %s
-            AND EXTRACT(MONTH FROM reported_date::date) = %s
+            WHERE EXTRACT(YEAR FROM reported_date) = %s
+            AND EXTRACT(MONTH FROM reported_date) = %s
             AND status = 'Missing'
         ''', (year, month))
-
         cf_count = cursor.fetchone()[0] or 0
 
-        # Get details of Cannot Find assets reported this month
         cursor.execute('''
             SELECT bfm_equipment_no, description, location, reported_date, technician_name, reported_by
             FROM cannot_find_assets
-            WHERE EXTRACT(YEAR FROM reported_date::date) = %s
-            AND EXTRACT(MONTH FROM reported_date::date) = %s
+            WHERE EXTRACT(YEAR FROM reported_date) = %s
+            AND EXTRACT(MONTH FROM reported_date) = %s
             AND status = 'Missing'
             ORDER BY reported_date DESC
         ''', (year, month))
-
         cannot_find_assets = cursor.fetchall()
 
-        # Get Mark as Found entries for this month
+        # Mark as Found
         cursor.execute('''
             SELECT COUNT(*)
             FROM cannot_find_assets
-            WHERE EXTRACT(YEAR FROM found_date::date) = %s
-            AND EXTRACT(MONTH FROM found_date::date) = %s
+            WHERE EXTRACT(YEAR FROM found_date) = %s
+            AND EXTRACT(MONTH FROM found_date) = %s
             AND status = 'Found'
         ''', (year, month))
-
         found_count = cursor.fetchone()[0] or 0
 
-        # Get details of Mark as Found assets for this month
         cursor.execute('''
             SELECT bfm_equipment_no, description, location, reported_date, found_date, found_by
             FROM cannot_find_assets
-            WHERE EXTRACT(YEAR FROM found_date::date) = %s
-            AND EXTRACT(MONTH FROM found_date::date) = %s
+            WHERE EXTRACT(YEAR FROM found_date) = %s
+            AND EXTRACT(MONTH FROM found_date) = %s
             AND status = 'Found'
             ORDER BY found_date DESC
         ''', (year, month))
-
         found_assets = cursor.fetchall()
 
-        # Get Run to Failure entries count (separate)
+        # Run to Failure
         cursor.execute('''
             SELECT COUNT(*)
             FROM run_to_failure_assets
-            WHERE EXTRACT(YEAR FROM completion_date::date) = %s
-            AND EXTRACT(MONTH FROM completion_date::date) = %s
+            WHERE EXTRACT(YEAR FROM completion_date) = %s
+            AND EXTRACT(MONTH FROM completion_date) = %s
         ''', (year, month))
-
         rtf_count = cursor.fetchone()[0] or 0
 
-        # Get Deactivated entries count
+        # Deactivated
         cursor.execute('''
             SELECT COUNT(*)
             FROM deactivated_assets
-            WHERE EXTRACT(YEAR FROM deactivated_date::date) = %s
-            AND EXTRACT(MONTH FROM deactivated_date::date) = %s
+            WHERE EXTRACT(YEAR FROM deactivated_date) = %s
+            AND EXTRACT(MONTH FROM deactivated_date) = %s
             AND status = 'Deactivated'
         ''', (year, month))
-
         deactivated_count = cursor.fetchone()[0] or 0
 
-        # Get CM statistics
-        # CMs created this month
-        cursor.execute('''
-            SELECT COUNT(*)
-            FROM corrective_maintenance
-            WHERE EXTRACT(YEAR FROM created_date::date) = %s
-            AND EXTRACT(MONTH FROM created_date::date) = %s
-        ''', (year, month))
-
-        cms_created = cursor.fetchone()[0] or 0
-
-        # CMs completed/closed this month (TOTAL)
-        cursor.execute('''
-            SELECT COUNT(*)
-            FROM corrective_maintenance
-            WHERE EXTRACT(YEAR FROM completion_date::date) = %s
-            AND EXTRACT(MONTH FROM completion_date::date) = %s
-            AND (status = 'Closed' OR status = 'Completed')
-        ''', (year, month))
-
-        cms_closed = cursor.fetchone()[0] or 0
-
-        # NEW: CMs created AND closed in the same month
-        cursor.execute('''
-            SELECT COUNT(*)
-            FROM corrective_maintenance
-            WHERE EXTRACT(YEAR FROM created_date::date) = %s
-            AND EXTRACT(MONTH FROM created_date::date) = %s
-            AND EXTRACT(YEAR FROM completion_date::date) = %s
-            AND EXTRACT(MONTH FROM completion_date::date) = %s
-            AND (status = 'Closed' OR status = 'Completed')
-        ''', (year, month, year, month))
-
-        cms_created_and_closed = cursor.fetchone()[0] or 0
-
-        # NEW: CMs created BEFORE this month but closed this month
-        cursor.execute('''
-            SELECT COUNT(*)
-            FROM corrective_maintenance
-            WHERE (EXTRACT(YEAR FROM created_date::date) != %s OR EXTRACT(MONTH FROM created_date::date) != %s)
-            AND EXTRACT(YEAR FROM completion_date::date) = %s
-            AND EXTRACT(MONTH FROM completion_date::date) = %s
-            AND (status = 'Closed' OR status = 'Completed')
-        ''', (year, month, year, month))
-
-        cms_closed_from_before = cursor.fetchone()[0] or 0
-
-        # Calculate the last day of the reporting month
-        last_day = calendar.monthrange(year, month)[1]
-        month_end_date = f"{year}-{month:02d}-{last_day:02d}"
-
-        # Currently open CMs (as of the end of the reporting month)
-        # These are CMs that were created on or before the month end AND either:
-        # 1. Still open (status = 'Open'), OR
-        # 2. Closed after the month end
-        cursor.execute('''
-            SELECT COUNT(*)
-            FROM corrective_maintenance
-            WHERE created_date::date <= %s::date
-            AND (
-                status = 'Open'
-                OR (status IN ('Closed', 'Completed') AND completion_date::date > %s::date)
-            )
-        ''', (month_end_date, month_end_date))
-
-        cms_open_current = cursor.fetchone()[0] or 0
-
-        # Get total days open for CMs that were open as of the end of the reporting month
-        # Calculate days open from creation to the end of the reporting month
-        cursor.execute('''
-            SELECT
-                SUM(%s::date - created_date::date) as total_days_open,
-                AVG(%s::date - created_date::date) as avg_days_open
-            FROM corrective_maintenance
-            WHERE created_date::date <= %s::date
-            AND (
-                status = 'Open'
-                OR (status IN ('Closed', 'Completed') AND completion_date::date > %s::date)
-            )
-        ''', (month_end_date, month_end_date, month_end_date, month_end_date))
-
-        open_days_result = cursor.fetchone()
-        cms_total_days_open = open_days_result[0] or 0
-        cms_avg_days_open = open_days_result[1] or 0.0
-
-        # Get CM total labor hours for CMs closed this month
-        cursor.execute('''
-            SELECT
-                SUM(labor_hours) as total_hours,
-                AVG(labor_hours) as avg_hours
-            FROM corrective_maintenance
-            WHERE EXTRACT(YEAR FROM completion_date::date) = %s
-            AND EXTRACT(MONTH FROM completion_date::date) = %s
-            AND (status = 'Closed' OR status = 'Completed')
-        ''', (year, month))
-
-        cm_hours_result = cursor.fetchone()
-        cm_total_hours = cm_hours_result[0] or 0.0
-        cm_avg_hours = cm_hours_result[1] or 0.0
-
-        # Get total days open for CMs closed this month (time to close)
-        cursor.execute('''
-            SELECT
-                SUM(completion_date::date - created_date::date) as total_days_to_close,
-                AVG(completion_date::date - created_date::date) as avg_days_to_close
-            FROM corrective_maintenance
-            WHERE EXTRACT(YEAR FROM completion_date::date) = %s
-            AND EXTRACT(MONTH FROM completion_date::date) = %s
-            AND (status = 'Closed' OR status = 'Completed')
-        ''', (year, month))
-
-        closed_days_result = cursor.fetchone()
-        cms_total_days_to_close = closed_days_result[0] or 0
-        cms_avg_days_to_close = closed_days_result[1] or 0.0
-
-        # Display Enhanced CM Statistics
-        print("CORRECTIVE MAINTENANCE (CM) SUMMARY:")
-        print(f"  CMs Created This Month: {cms_created}")
-        print(f"  CMs Closed This Month: {cms_closed}")
-        print(f"    - Created & Closed in {month_name}: {cms_created_and_closed}")
-        print(f"    - Created Before {month_name}, Closed in {month_name}: {cms_closed_from_before}")
-        if cms_closed > 0:
-            print(f"    - Total Days to Close (All Closed CMs): {cms_total_days_to_close} days")
-            print(f"    - Average Days to Close per CM: {cms_avg_days_to_close:.1f} days")
-            print()
-
-            # Detailed breakdown of Days to Close for all closed CMs
-            print("=" * 100)
-            print(f"DETAILED BREAKDOWN: DAYS TO CLOSE (All Closed CMs in {month_name} {year})")
-            print("=" * 100)
-            print()
-            print("Calculation: Days to Close = Date Closed - Date Created")
-            print()
-
-            # Query all closed CMs with their details
-            cursor.execute('''
-                SELECT
-                    cm.cm_number,
-                    cm.created_date,
-                    cm.completion_date,
-                    cm.assigned_technician,
-                    cm.bfm_equipment_no,
-                    cm.description,
-                    cm.priority,
-                    (cm.completion_date::date - cm.created_date::date) as days_to_close,
-                    cm.root_cause,
-                    cm.corrective_action
-                FROM corrective_maintenance cm
-                WHERE EXTRACT(YEAR FROM cm.completion_date::date) = %s
-                AND EXTRACT(MONTH FROM cm.completion_date::date) = %s
-                AND (cm.status = 'Closed' OR cm.status = 'Completed')
-                ORDER BY cm.completion_date
-            ''', (year, month))
-
-            closed_cms = cursor.fetchall()
-
-            for cm_data in closed_cms:
-                cm_number, created_date, completion_date, technician, equipment, description, priority, days, root_cause, corrective_action = cm_data
-
-                # Format dates - handle both string and datetime objects
-                if created_date:
-                    created_str = created_date.strftime('%Y-%m-%d') if hasattr(created_date, 'strftime') else str(created_date)[:10]
-                else:
-                    created_str = "Unknown"
-
-                if completion_date:
-                    completed_str = completion_date.strftime('%Y-%m-%d') if hasattr(completion_date, 'strftime') else str(completion_date)[:10]
-                else:
-                    completed_str = "Unknown"
-
-                tech_name = technician if technician else "Unassigned"
-                equip_str = equipment if equipment else "N/A"
-                desc_str = (description[:60] + "...") if description and len(description) > 60 else (description or "No description")
-                priority_str = priority if priority else "N/A"
-
-                print(f"CM Number: {cm_number}")
-                print(f"  Priority: {priority_str}")
-                print(f"  Equipment: {equip_str}")
-                print(f"  Description: {desc_str}")
-                print(f"  Date Created: {created_str}")
-                print(f"  Date Closed: {completed_str}")
-                print(f"  Days to Close: {days} days ({completed_str} - {created_str})")
-                print(f"  Technician: {tech_name}")
-
-                # Display root cause and corrective action
-                root_cause_str = root_cause if root_cause else "Not recorded"
-                corrective_action_str = corrective_action if corrective_action else "Not recorded"
-                print(f"  Root Cause: {root_cause_str}")
-                print(f"  Corrective Action: {corrective_action_str}")
-
-                # Get MRO stock items used for this CM
-                cursor.execute('''
-                    SELECT
-                        cpu.part_number,
-                        mro.name,
-                        cpu.quantity_used,
-                        mro.unit_price,
-                        cpu.total_cost,
-                        mro.unit_of_measure
-                    FROM cm_parts_used cpu
-                    LEFT JOIN mro_inventory mro ON cpu.part_number = mro.part_number
-                    WHERE cpu.cm_number = %s
-                    ORDER BY cpu.recorded_date
-                ''', (cm_number,))
-
-                parts_used = cursor.fetchall()
-
-                if parts_used:
-                    print(f"  MRO Stock Items Used:")
-                    total_cm_cost = 0.0
-                    for part_number, name, qty, unit_price, total_cost, uom in parts_used:
-                        part_name = name if name else "Unknown Part"
-                        quantity = qty if qty else 0
-                        price = unit_price if unit_price else 0.0
-                        # Always use current unit_price from mro_inventory, not cached total_cost
-                        cost = quantity * price
-                        unit = uom if uom else "EA"
-
-                        print(f"    - Part#: {part_number} | {part_name}")
-                        print(f"      Qty: {quantity} {unit} @ ${price:.2f}/unit = ${cost:.2f}")
-                        total_cm_cost += cost
-
-                    print(f"  Total MRO Cost for CM: ${total_cm_cost:.2f}")
-                else:
-                    print(f"  MRO Stock Items Used: None recorded")
-
-                print("-" * 100)
-                print()
-
-            print("=" * 100)
-            print()
-
-        print(f"  CM Total Labor Hours (Closed): {cm_total_hours:.1f} hours")
-        print(f"  CM Average Hours per Closure: {cm_avg_hours:.1f} hours")
-        print(f"  Currently Open CMs: {cms_open_current}")
-        if cms_open_current > 0:
-            print(f"    - Total Days Open (All Open CMs): {cms_total_days_open} days")
-            print(f"    - Average Days Open per CM: {cms_avg_days_open:.1f} days")
-            print()
-
-        # ==================== OVERALL MAINTENANCE EFFICIENCY ====================
-        # Define constants for efficiency calculation
-        TOTAL_TECHNICIANS = 9
-        ANNUAL_HOURS_PER_TECHNICIAN = 1900
-        WEEKLY_AVAILABLE_HOURS = 328.85
-        MONTHLY_AVAILABLE_HOURS = 1425.0  # Updated from 1485.0 hours
-        TARGET_EFFICIENCY_RATE = 80.0
-
-        # Calculate Cannot Find hours (2 hours per asset)
-        HOURS_PER_CANNOT_FIND = 2.0
-        cannot_find_hours = cf_count * HOURS_PER_CANNOT_FIND
-
-        # Calculate total maintenance hours (PM + Outstanding PM + CM)
-        total_maintenance_hours = pm_total_hours + outstanding_total_hours + cm_total_hours
-
-        # Calculate efficiency rate
-        efficiency_rate = (total_maintenance_hours / MONTHLY_AVAILABLE_HOURS) * 100 if MONTHLY_AVAILABLE_HOURS > 0 else 0.0
-
-        # Determine status
-        efficiency_status = "MEETS TARGET ✓" if efficiency_rate >= TARGET_EFFICIENCY_RATE else "BELOW TARGET ✗"
-
-        print()
-        print("=" * 80)
-        print("OVERALL MAINTENANCE EFFICIENCY")
-        print("=" * 80)
-        print()
-        print(f"  Total PM Hours (Assigned This Month): {pm_total_hours:.1f} hours")
-        print(f"  Total Outstanding PM Hours: {outstanding_total_hours:.1f} hours")
-        print(f"  Total CM Hours: {cm_total_hours:.1f} hours")
-        print(f"  Total Maintenance Hours: {total_maintenance_hours:.1f} hours")
-        print()
-        print(f"  Cannot Find Assets Count: {cf_count}")
-        print(f"  Cannot Find Search Hours: {cannot_find_hours:.1f} hours")
-        print(f"    (Based on {HOURS_PER_CANNOT_FIND:.1f} hours per Cannot Find asset)")
-        print()
-        print(f"  Monthly Available Hours: {MONTHLY_AVAILABLE_HOURS:.1f} hours")
-        print(f"    (Based on {TOTAL_TECHNICIANS} technicians × {ANNUAL_HOURS_PER_TECHNICIAN} hours/year ÷ 12 months)")
-        print(f"    (Weekly Available: {WEEKLY_AVAILABLE_HOURS:.2f} hours)")
-        print()
-        print(f"  Overall Efficiency Rate: {efficiency_rate:.1f}%")
-        print(f"  Target Efficiency Rate: {TARGET_EFFICIENCY_RATE:.1f}%")
-        print(f"  Status: {efficiency_status}")
-        print()
-
-        if cms_open_current > 0:
-            # Detailed breakdown of currently open CMs
-            print("=" * 100)
-            print(f"DETAILED BREAKDOWN: CURRENTLY OPEN CMs")
-            print("=" * 100)
-            print()
-            print("Calculation: Days Open = Current Date - Date Created")
-            print()
-
-            # Query all currently open CMs with their details
-            cursor.execute('''
-                SELECT
-                    cm.cm_number,
-                    cm.created_date,
-                    cm.assigned_technician,
-                    cm.bfm_equipment_no,
-                    cm.description,
-                    cm.priority,
-                    (CURRENT_DATE - cm.created_date::date) as days_open
-                FROM corrective_maintenance cm
-                WHERE cm.status = 'Open'
-                ORDER BY cm.created_date
-            ''')
-
-            open_cms = cursor.fetchall()
-
-            for cm_data in open_cms:
-                cm_number, created_date, technician, equipment, description, priority, days_open = cm_data
-
-                # Format dates - handle both string and datetime objects
-                if created_date:
-                    created_str = created_date.strftime('%Y-%m-%d') if hasattr(created_date, 'strftime') else str(created_date)[:10]
-                else:
-                    created_str = "Unknown"
-
-                current_date_str = datetime.now().strftime('%Y-%m-%d')
-                tech_name = technician if technician else "Unassigned"
-                equip_str = equipment if equipment else "N/A"
-                desc_str = (description[:60] + "...") if description and len(description) > 60 else (description or "No description")
-                priority_str = priority if priority else "N/A"
-
-                print(f"CM Number: {cm_number}")
-                print(f"  Priority: {priority_str}")
-                print(f"  Equipment: {equip_str}")
-                print(f"  Description: {desc_str}")
-                print(f"  Date Created: {created_str}")
-                print(f"  Days Open: {days_open} days (as of {current_date_str})")
-                print(f"  Technician: {tech_name}")
-
-                # Get MRO stock items used for this CM (if any parts were already consumed during work)
-                cursor.execute('''
-                    SELECT
-                        cpu.part_number,
-                        mro.name,
-                        cpu.quantity_used,
-                        mro.unit_price,
-                        cpu.total_cost,
-                        mro.unit_of_measure
-                    FROM cm_parts_used cpu
-                    LEFT JOIN mro_inventory mro ON cpu.part_number = mro.part_number
-                    WHERE cpu.cm_number = %s
-                    ORDER BY cpu.recorded_date
-                ''', (cm_number,))
-
-                parts_used = cursor.fetchall()
-
-                if parts_used:
-                    print(f"  MRO Stock Items Used (work in progress):")
-                    total_cm_cost = 0.0
-                    for part_number, name, qty, unit_price, total_cost, uom in parts_used:
-                        part_name = name if name else "Unknown Part"
-                        quantity = qty if qty else 0
-                        price = unit_price if unit_price else 0.0
-                        # Always use current unit_price from mro_inventory, not cached total_cost
-                        cost = quantity * price
-                        unit = uom if uom else "EA"
-
-                        print(f"    - Part#: {part_number} | {part_name}")
-                        print(f"      Qty: {quantity} {unit} @ ${price:.2f}/unit = ${cost:.2f}")
-                        total_cm_cost += cost
-
-                    print(f"  Total MRO Cost (so far): ${total_cm_cost:.2f}")
-                else:
-                    print(f"  MRO Stock Items Used: None recorded yet")
-
-                print("-" * 100)
-                print()
-
-            print("=" * 100)
-            print()
-
-        print()
-
-        # NEW: Show details of CMs closed from previous months (if any)
-        if cms_closed_from_before > 0:
-            print("=" * 80)
-            print(f"CMs CREATED BEFORE {month_name.upper()} BUT CLOSED IN {month_name.upper()}:")
-            print("=" * 80)
-    
-            cursor.execute('''
-                SELECT 
-                    cm_number,
-                    bfm_equipment_no,
-                    created_date,
-                    completion_date,
-                    assigned_technician
-                FROM corrective_maintenance 
-                WHERE (EXTRACT(YEAR FROM created_date::date) != %s OR EXTRACT(MONTH FROM created_date::date) != %s)
-                AND EXTRACT(YEAR FROM completion_date::date) = %s
-                AND EXTRACT(MONTH FROM completion_date::date) = %s
-                AND (status = 'Closed' OR status = 'Completed')
-                ORDER BY completion_date
-            ''', (year, month, year, month))
-    
-            old_cms = cursor.fetchall()
-    
-            print(f"{'CM#':<12} {'Created':<12} {'Closed':<12} {'Equipment':<15} {'Tech':<20}")
-            print("-" * 80)
-    
-            for cm_number, bfm, created, completed, tech in old_cms:
-                created_short = str(created)[:10] if created else "Unknown"
-                completed_short = str(completed)[:10] if completed else "Unknown"
-                bfm_short = (bfm[:15] if bfm else "N/A")
-                tech_short = (tech[:20] if tech else "Unassigned")
-                print(f"{cm_number:<12} {created_short:<12} {completed_short:<12} {bfm_short:<15} {tech_short:<20}")
-    
-            print()
-
-        # NEW: Show details of PMs assigned before this month but completed this month (Outstanding Completions)
-        if outstanding_completions > 0:
-            print("=" * 120)
-            print(f"OUTSTANDING PM COMPLETIONS - ASSIGNED BEFORE {month_name.upper()} BUT COMPLETED IN {month_name.upper()}:")
-            print("=" * 120)
-            print()
-
-            cursor.execute('''
-                SELECT
-                    bfm_equipment_no,
-                    pm_type,
-                    pm_due_date,
-                    completion_date,
-                    technician_name,
-                    labor_hours,
-                    labor_minutes,
-                    notes
-                FROM pm_completions
-                WHERE EXTRACT(YEAR FROM completion_date::date) = %s
-                AND EXTRACT(MONTH FROM completion_date::date) = %s
-                AND (
-                    pm_due_date IS NULL
-                    OR pm_due_date = ''
-                    OR EXTRACT(YEAR FROM pm_due_date::date) != %s
-                    OR EXTRACT(MONTH FROM pm_due_date::date) != %s
-                )
-                AND pm_type NOT IN ('CANNOT FIND', 'Cannot Find', 'Run to Failure', 'RTF')
-                ORDER BY technician_name, completion_date
-            ''', (year, month, year, month))
-
-            outstanding_pms = cursor.fetchall()
-
-            print(f"{'Equipment':<18} {'PM Type':<12} {'Assigned':<12} {'Completed':<12} {'Labor Hrs':<12} {'Technician':<20}")
-            print("-" * 120)
-
-            for bfm_no, pm_type, assigned_date, completed_date, tech, labor_hrs, labor_mins, notes in outstanding_pms:
-                assigned_short = str(assigned_date)[:10] if assigned_date else "Unknown"
-                completed_short = str(completed_date)[:10] if completed_date else "Unknown"
-                bfm_short = (bfm_no[:18] if bfm_no else "N/A")
-                tech_short = (tech[:20] if tech else "Unassigned")
-                pm_type_short = (pm_type[:12] if pm_type else "N/A")
-                total_hours = (labor_hrs or 0) + ((labor_mins or 0) / 60.0)
-                hours_str = f"{total_hours:.1f}h"
-
-                print(f"{bfm_short:<18} {pm_type_short:<12} {assigned_short:<12} {completed_short:<12} {hours_str:<12} {tech_short:<20}")
-
-                # Display notes/description if available
-                if notes and notes.strip():
-                    note_lines = notes.strip().split('\n')
-                    for line in note_lines[:3]:  # Show first 3 lines of notes
-                        truncated_note = (line[:110] + '...') if len(line) > 110 else line
-                        print(f"  Note: {truncated_note}")
-
-            print()
-            print(f"Total Outstanding Completions: {outstanding_completions}")
-            print(f"Total Labor Hours (Outstanding): {outstanding_total_hours:.1f} hours")
-            print()
-
-        # Display PM Completions (NOT including Cannot Find or Run to Failure)
+        # ── OVERALL SUMMARY ──────────────────────────────────────────────────
         print("MONTHLY OVERVIEW:")
         print(f"  PM Completions (Assigned & Completed in {month_name}): {pm_completions}")
         print(f"    - Total Labor Hours: {pm_total_hours:.1f} hours")
@@ -2190,8 +1688,6 @@ def generate_monthly_summary_report(conn, month=None, year=None):
         print()
         print(f"  Note: PM Completions + Outstanding = {pm_completions + outstanding_completions} total completions")
         print()
-    
-        # Display Cannot Find, Run to Failure, and Deactivated separately
         print("OTHER ACTIVITY (Not counted in PM totals):")
         print(f"  Cannot Find Entries: {cf_count}")
         print(f"  Mark as Found Entries: {found_count}")
@@ -2201,7 +1697,48 @@ def generate_monthly_summary_report(conn, month=None, year=None):
         print(f"  Total Assets Excluded from PM Requirements: {cf_count + rtf_count + deactivated_count}")
         print()
 
-        # Display detailed Cannot Find list if any assets were reported missing this month
+        # Outstanding PM detail
+        if outstanding_completions > 0:
+            print("=" * 120)
+            print(f"OUTSTANDING PM COMPLETIONS - ASSIGNED BEFORE {month_name.upper()} BUT COMPLETED IN {month_name.upper()}:")
+            print("=" * 120)
+            print()
+            cursor.execute('''
+                SELECT bfm_equipment_no, pm_type, pm_due_date, completion_date,
+                       technician_name, labor_hours, labor_minutes, notes
+                FROM pm_completions
+                WHERE EXTRACT(YEAR FROM completion_date) = %s
+                AND EXTRACT(MONTH FROM completion_date) = %s
+                AND (
+                    pm_due_date IS NULL OR pm_due_date = ''
+                    OR EXTRACT(YEAR FROM pm_due_date) != %s
+                    OR EXTRACT(MONTH FROM pm_due_date) != %s
+                )
+                AND pm_type NOT IN ('CANNOT FIND', 'Cannot Find', 'Run to Failure', 'RTF')
+                ORDER BY technician_name, completion_date
+            ''', (year, month, year, month))
+            outstanding_pms = cursor.fetchall()
+            print(f"{'Equipment':<18} {'PM Type':<12} {'Assigned':<12} {'Completed':<12} {'Labor Hrs':<12} {'Technician':<20}")
+            print("-" * 120)
+            for bfm_no, pm_type, assigned_date, completed_date, tech, labor_hrs, labor_mins, notes in outstanding_pms:
+                assigned_short = str(assigned_date)[:10] if assigned_date else "Unknown"
+                completed_short = str(completed_date)[:10] if completed_date else "Unknown"
+                bfm_short = (bfm_no[:18] if bfm_no else "N/A")
+                tech_short = (tech[:20] if tech else "Unassigned")
+                pm_type_short = (pm_type[:12] if pm_type else "N/A")
+                total_hours = (labor_hrs or 0) + ((labor_mins or 0) / 60.0)
+                hours_str = f"{total_hours:.1f}h"
+                print(f"{bfm_short:<18} {pm_type_short:<12} {assigned_short:<12} {completed_short:<12} {hours_str:<12} {tech_short:<20}")
+                if notes and notes.strip():
+                    for line in notes.strip().split('\n')[:3]:
+                        truncated_note = (line[:110] + '...') if len(line) > 110 else line
+                        print(f"  Note: {truncated_note}")
+            print()
+            print(f"Total Outstanding Completions: {outstanding_completions}")
+            print(f"Total Labor Hours (Outstanding): {outstanding_total_hours:.1f} hours")
+            print()
+
+        # Cannot Find details
         if cf_count > 0:
             print("CANNOT FIND ASSETS DETAILS:")
             print(f"{'BFM Number':<15} {'Description':<30} {'Location':<20} {'Reported Date':<15} {'Technician':<20}")
@@ -2210,19 +1747,15 @@ def generate_monthly_summary_report(conn, month=None, year=None):
                 bfm_no = asset[0] or 'N/A'
                 desc = (asset[1][:27] + '...') if asset[1] and len(asset[1]) > 30 else (asset[1] or 'N/A')
                 loc = (asset[2][:17] + '...') if asset[2] and len(asset[2]) > 20 else (asset[2] or 'N/A')
-                # Format reported date properly - extract first 10 chars (YYYY-MM-DD)
                 reported_date = asset[3]
-                if reported_date:
-                    reported = reported_date.strftime('%Y-%m-%d') if hasattr(reported_date, 'strftime') else str(reported_date)[:10]
-                else:
-                    reported = 'N/A'
+                reported = reported_date.strftime('%Y-%m-%d') if hasattr(reported_date, 'strftime') else str(reported_date)[:10] if reported_date else 'N/A'
                 technician = (asset[4][:17] + '...') if asset[4] and len(asset[4]) > 20 else (asset[4] or 'N/A')
                 print(f"{bfm_no:<15} {desc:<30} {loc:<20} {reported:<15} {technician:<20}")
             print()
             print(f"Total Cannot Find Assets Reported: {cf_count}")
             print()
 
-        # Display detailed Mark as Found list if any assets were found this month
+        # Mark as Found details
         if found_count > 0:
             print("MARK AS FOUND ASSETS DETAILS:")
             print(f"{'BFM Number':<15} {'Description':<30} {'Location':<20} {'Reported Date':<15} {'Found Date':<15} {'Found By':<15}")
@@ -2231,522 +1764,171 @@ def generate_monthly_summary_report(conn, month=None, year=None):
                 bfm_no = asset[0] or 'N/A'
                 desc = (asset[1][:27] + '...') if asset[1] and len(asset[1]) > 30 else (asset[1] or 'N/A')
                 loc = (asset[2][:17] + '...') if asset[2] and len(asset[2]) > 20 else (asset[2] or 'N/A')
-                # Format reported date properly
                 reported_date_val = asset[3]
-                if reported_date_val:
-                    reported = reported_date_val.strftime('%Y-%m-%d') if hasattr(reported_date_val, 'strftime') else str(reported_date_val)[:10]
-                else:
-                    reported = 'N/A'
-                # Format found date properly
+                reported = reported_date_val.strftime('%Y-%m-%d') if hasattr(reported_date_val, 'strftime') else str(reported_date_val)[:10] if reported_date_val else 'N/A'
                 found_date_val = asset[4]
-                if found_date_val:
-                    found_date = found_date_val.strftime('%Y-%m-%d') if hasattr(found_date_val, 'strftime') else str(found_date_val)[:10]
-                else:
-                    found_date = 'N/A'
+                found_date = found_date_val.strftime('%Y-%m-%d') if hasattr(found_date_val, 'strftime') else str(found_date_val)[:10] if found_date_val else 'N/A'
                 found_by = asset[5] or 'N/A'
                 print(f"{bfm_no:<15} {desc:<30} {loc:<20} {reported:<15} {found_date:<15} {found_by:<15}")
             print()
             print(f"Total Mark as Found Assets: {found_count}")
             print()
-    
-    
-    
-        # 2. PM TYPE BREAKDOWN (PM Completions only - excludes Cannot Find / Run to Failure)
+
+        # 2. PM TYPE BREAKDOWN
         cursor.execute('''
-            SELECT
-                pm_type,
-                COUNT(*) as count,
-                SUM(labor_hours + labor_minutes/60.0) as total_hours,
-                AVG(labor_hours + labor_minutes/60.0) as avg_hours
+            SELECT pm_type, COUNT(*) as count,
+                   SUM(labor_hours + labor_minutes/60.0) as total_hours,
+                   AVG(labor_hours + labor_minutes/60.0) as avg_hours
             FROM pm_completions
-            WHERE EXTRACT(YEAR FROM completion_date::date) = %s
-            AND EXTRACT(MONTH FROM completion_date::date) = %s
+            WHERE EXTRACT(YEAR FROM completion_date) = %s
+            AND EXTRACT(MONTH FROM completion_date) = %s
             AND pm_type NOT IN ('CANNOT FIND', 'Cannot Find', 'Run to Failure', 'RTF')
             GROUP BY pm_type
             ORDER BY count DESC
         ''', (year, month))
-    
         pm_types = cursor.fetchall()
-    
         if pm_types:
             print("PM TYPE BREAKDOWN:")
             print(f"{'PM Type':<15} {'Count':<10} {'Total Hours':<15} {'Avg Hours':<12}")
             print("-" * 55)
             for pm_type, count, total_hrs, avg_hrs in pm_types:
-                pm_type_str = pm_type if pm_type is not None else "N/A"
-                count_val = count if count is not None else 0
-                total_hrs_display = f"{total_hrs:.1f}h" if total_hrs else "0.0h"
-                avg_hrs_display = f"{avg_hrs:.1f}h" if avg_hrs else "0.0h"
-                print(f"{pm_type_str:<15} {count_val:<10} {total_hrs_display:<15} {avg_hrs_display:<12}")
+                print(f"{(pm_type or 'N/A'):<15} {(count or 0):<10} {f'{total_hrs:.1f}h' if total_hrs else '0.0h':<15} {f'{avg_hrs:.1f}h' if avg_hrs else '0.0h':<12}")
             print()
-    
-        # 3. DAILY COMPLETION TRACKING (PM Completions only - excludes Cannot Find / Run to Failure)
+
+        # 3. DAILY COMPLETION TRACKING
         cursor.execute('''
-            SELECT
-                completion_date,
-                COUNT(*) as daily_count,
-                SUM(labor_hours + labor_minutes/60.0) as daily_hours
+            SELECT completion_date, COUNT(*) as daily_count,
+                   SUM(labor_hours + labor_minutes/60.0) as daily_hours
             FROM pm_completions
-            WHERE EXTRACT(YEAR FROM completion_date::date) = %s
-            AND EXTRACT(MONTH FROM completion_date::date) = %s
+            WHERE EXTRACT(YEAR FROM completion_date) = %s
+            AND EXTRACT(MONTH FROM completion_date) = %s
             AND pm_type NOT IN ('CANNOT FIND', 'Cannot Find', 'Run to Failure', 'RTF')
             GROUP BY completion_date
             ORDER BY completion_date
         ''', (year, month))
-    
         daily_data = cursor.fetchall()
-    
         if daily_data:
             print("DAILY COMPLETION SUMMARY:")
             print(f"{'Date':<12} {'PMs Completed':<15} {'Labor Hours':<12} {'Running Total':<15}")
             print("-" * 55)
-        
             running_total = 0
             for date, count, hours in daily_data:
-                date_str = str(date) if date is not None else "N/A"
-                count_val = count if count is not None else 0
+                count_val = count or 0
                 running_total += count_val
-                hours_display = f"{hours:.1f}h" if hours else "0.0h"
-                print(f"{date_str:<12} {count_val:<15} {hours_display:<12} {running_total:<15}")
+                print(f"{str(date) if date else 'N/A':<12} {count_val:<15} {f'{hours:.1f}h' if hours else '0.0h':<12} {running_total:<15}")
             print()
-    
-        # 4. TECHNICIAN PERFORMANCE (PM Completions only - excludes Cannot Find / Run to Failure)
-        # Get completions per technician
+
+        # 4. TECHNICIAN PERFORMANCE
         cursor.execute('''
-            SELECT
-                technician_name,
-                COUNT(*) as completions,
-                SUM(labor_hours + labor_minutes/60.0) as total_hours,
-                AVG(labor_hours + labor_minutes/60.0) as avg_hours
+            SELECT technician_name, COUNT(*) as completions,
+                   SUM(labor_hours + labor_minutes/60.0) as total_hours,
+                   AVG(labor_hours + labor_minutes/60.0) as avg_hours
             FROM pm_completions
-            WHERE EXTRACT(YEAR FROM completion_date::date) = %s
-            AND EXTRACT(MONTH FROM completion_date::date) = %s
+            WHERE EXTRACT(YEAR FROM completion_date) = %s
+            AND EXTRACT(MONTH FROM completion_date) = %s
             AND pm_type NOT IN ('CANNOT FIND', 'Cannot Find', 'Run to Failure', 'RTF')
             GROUP BY technician_name
             ORDER BY completions DESC
         ''', (year, month))
-
         completions_data = {row[0]: {'count': row[1], 'total_hrs': row[2], 'avg_hrs': row[3]}
                             for row in cursor.fetchall()}
 
-        # Get assigned PMs per technician for completion rate calculation
-        # Count PMs that were scheduled for completion in this month
         cursor.execute('''
-            SELECT
-                assigned_technician,
-                COUNT(*) as assigned_count
+            SELECT assigned_technician, COUNT(*) as assigned_count
             FROM weekly_pm_schedules
-            WHERE EXTRACT(YEAR FROM scheduled_date::date) = %s
-            AND EXTRACT(MONTH FROM scheduled_date::date) = %s
-            AND assigned_technician IS NOT NULL
-            AND assigned_technician != ''
+            WHERE EXTRACT(YEAR FROM scheduled_date) = %s
+            AND EXTRACT(MONTH FROM scheduled_date) = %s
+            AND assigned_technician IS NOT NULL AND assigned_technician != ''
             GROUP BY assigned_technician
         ''', (year, month))
-
         assigned_pms = {row[0]: row[1] for row in cursor.fetchall()}
 
-        # Get Cannot Find count per technician for this month
         cursor.execute('''
-            SELECT
-                assigned_technician,
-                COUNT(*) as cannot_find_count
+            SELECT assigned_technician, COUNT(*) as cannot_find_count
             FROM weekly_pm_schedules
-            WHERE EXTRACT(YEAR FROM scheduled_date::date) = %s
-            AND EXTRACT(MONTH FROM scheduled_date::date) = %s
+            WHERE EXTRACT(YEAR FROM scheduled_date) = %s
+            AND EXTRACT(MONTH FROM scheduled_date) = %s
             AND status = 'Cannot Find'
-            AND assigned_technician IS NOT NULL
-            AND assigned_technician != ''
+            AND assigned_technician IS NOT NULL AND assigned_technician != ''
             GROUP BY assigned_technician
         ''', (year, month))
-
         cannot_find_pms = {row[0]: row[1] for row in cursor.fetchall()}
 
-        # Build complete list of all technicians with any activity
         all_technicians = set(list(assigned_pms.keys()) + list(completions_data.keys()) + list(cannot_find_pms.keys()))
-
         if all_technicians:
             print("TECHNICIAN PERFORMANCE:")
             print(f"{'Technician':<25} {'Assigned':<12} {'Completed':<12} {'Cannot Find':<14} {'Rate':<12} {'Total Hours':<15} {'Avg Hours':<12}")
             print("-" * 110)
-
-            # Sort technicians by completion count (descending), then by name
             tech_list = sorted(all_technicians,
-                              key=lambda t: (completions_data.get(t, {}).get('count', 0), t),
-                              reverse=True)
-
+                               key=lambda t: (completions_data.get(t, {}).get('count', 0), t),
+                               reverse=True)
             for tech in tech_list:
-                # Get assigned PM count for this technician
                 assigned_count = assigned_pms.get(tech, 0)
-
-                # Get completion data for this technician
                 comp_data = completions_data.get(tech, {'count': 0, 'total_hrs': 0.0, 'avg_hrs': 0.0})
                 count = comp_data['count']
                 total_hrs = comp_data['total_hrs']
                 avg_hrs = comp_data['avg_hrs']
-
-                # Get Cannot Find count for this technician (0 if none)
-                cf_count = cannot_find_pms.get(tech, 0)
-
-                # Calculate completion rate percentage
-                if assigned_count > 0:
-                    completion_rate = (count / assigned_count) * 100
-                    rate_display = f"{completion_rate:.1f}%"
-                else:
-                    # If no assigned PMs tracked, show count without percentage
-                    rate_display = "N/A"
-
+                cf_tech_count = cannot_find_pms.get(tech, 0)
+                rate_display = f"{(count / assigned_count) * 100:.1f}%" if assigned_count > 0 else "N/A"
                 tech_str = tech if tech is not None else "Unassigned"
-                total_hrs_display = f"{total_hrs:.1f}h" if total_hrs else "0.0h"
-                avg_hrs_display = f"{avg_hrs:.1f}h" if avg_hrs else "0.0h"
-                print(f"{tech_str:<25} {assigned_count:<12} {count:<12} {cf_count:<14} {rate_display:<12} {total_hrs_display:<15} {avg_hrs_display:<12}")
-            print()
-    
-        # 5. CM BREAKDOWN BY PRIORITY AND TECHNICIAN
-        # First show CMs created this month by priority
-        cursor.execute('''
-            SELECT
-                priority,
-                COUNT(*) as count
-            FROM corrective_maintenance
-            WHERE EXTRACT(YEAR FROM created_date::date) = %s
-            AND EXTRACT(MONTH FROM created_date::date) = %s
-            GROUP BY priority
-            ORDER BY
-                CASE priority
-                    WHEN 'Critical' THEN 1
-                    WHEN 'High' THEN 2
-                    WHEN 'Medium' THEN 3
-                    WHEN 'Low' THEN 4
-                    ELSE 5
-                END
-        ''', (year, month))
-
-        cm_priorities_created = cursor.fetchall()
-
-        if cm_priorities_created:
-            print("CM BREAKDOWN BY PRIORITY (Created This Month):")
-            print(f"{'Priority':<15} {'Count':<10}")
-            print("-" * 25)
-            for priority, count in cm_priorities_created:
-                priority_str = priority if priority is not None else "N/A"
-                count_val = count if count is not None else 0
-                print(f"{priority_str:<15} {count_val:<10}")
+                print(f"{tech_str:<25} {assigned_count:<12} {count:<12} {cf_tech_count:<14} {rate_display:<12} {f'{total_hrs:.1f}h' if total_hrs else '0.0h':<15} {f'{avg_hrs:.1f}h' if avg_hrs else '0.0h':<12}")
             print()
 
-        # Now show CMs closed this month by priority with hours
+        # 5. LOCATION SUMMARY
         cursor.execute('''
-            SELECT
-                priority,
-                COUNT(*) as count,
-                SUM(labor_hours) as total_hours,
-                AVG(labor_hours) as avg_hours
-            FROM corrective_maintenance
-            WHERE EXTRACT(YEAR FROM completion_date::date) = %s
-            AND EXTRACT(MONTH FROM completion_date::date) = %s
-            AND (status = 'Closed' OR status = 'Completed')
-            GROUP BY priority
-            ORDER BY
-                CASE priority
-                    WHEN 'Critical' THEN 1
-                    WHEN 'High' THEN 2
-                    WHEN 'Medium' THEN 3
-                    WHEN 'Low' THEN 4
-                    ELSE 5
-                END
-        ''', (year, month))
-
-        cm_priorities_closed = cursor.fetchall()
-
-        if cm_priorities_closed:
-            print("CM BREAKDOWN BY PRIORITY (Closed This Month):")
-            print(f"{'Priority':<15} {'Count':<10} {'Total Hours':<15} {'Avg Hours':<12}")
-            print("-" * 55)
-            for priority, count, total_hrs, avg_hrs in cm_priorities_closed:
-                priority_str = priority if priority is not None else "N/A"
-                count_val = count if count is not None else 0
-                total_hrs_display = f"{total_hrs:.1f}h" if total_hrs else "0.0h"
-                avg_hrs_display = f"{avg_hrs:.1f}h" if avg_hrs else "0.0h"
-                print(f"{priority_str:<15} {count_val:<10} {total_hrs_display:<15} {avg_hrs_display:<12}")
-            print()
-    
-        # CM completion by technician
-        cursor.execute('''
-            SELECT
-                assigned_technician,
-                COUNT(*) as completed,
-                SUM(labor_hours) as total_hours,
-                AVG(labor_hours) as avg_hours
-            FROM corrective_maintenance
-            WHERE EXTRACT(YEAR FROM completion_date::date) = %s
-            AND EXTRACT(MONTH FROM completion_date::date) = %s
-            AND (status = 'Closed' OR status = 'Completed')
-            GROUP BY assigned_technician
-            ORDER BY completed DESC
-        ''', (year, month))
-
-        cm_techs = cursor.fetchall()
-
-        if cm_techs:
-            print("CMs COMPLETED BY TECHNICIAN (This Month):")
-            print(f"{'Technician':<25} {'CMs Closed':<12} {'Total Hours':<15} {'Avg Hours':<12}")
-            print("-" * 67)
-            for tech, count, total_hrs, avg_hrs in cm_techs:
-                tech_str = tech if tech is not None else "Unassigned"
-                count_val = count if count is not None else 0
-                total_hrs_display = f"{total_hrs:.1f}h" if total_hrs else "0.0h"
-                avg_hrs_display = f"{avg_hrs:.1f}h" if avg_hrs else "0.0h"
-                print(f"{tech_str:<25} {count_val:<12} {total_hrs_display:<15} {avg_hrs_display:<12}")
-            print()
-    
-        # 6. EQUIPMENT LOCATION SUMMARY (PM Completions only)
-        cursor.execute('''
-            SELECT
-                e.location,
-                COUNT(*) as completions,
-                SUM(pc.labor_hours + pc.labor_minutes/60.0) as total_hours
+            SELECT e.location, COUNT(*) as completions,
+                   SUM(pc.labor_hours + pc.labor_minutes/60.0) as total_hours
             FROM pm_completions pc
             JOIN equipment e ON pc.bfm_equipment_no = e.bfm_equipment_no
-            WHERE EXTRACT(YEAR FROM pc.completion_date::date) = %s
-            AND EXTRACT(MONTH FROM pc.completion_date::date) = %s
+            WHERE EXTRACT(YEAR FROM pc.completion_date) = %s
+            AND EXTRACT(MONTH FROM pc.completion_date) = %s
             GROUP BY e.location
             ORDER BY completions DESC
         ''', (year, month))
-    
         locations = cursor.fetchall()
-    
         if locations:
             print("COMPLETIONS BY LOCATION:")
             print(f"{'Location':<30} {'Completions':<15} {'Total Hours':<12}")
             print("-" * 60)
             for location, count, hours in locations:
-                location_str = location if location is not None else "N/A"
-                count_val = count if count is not None else 0
-                hours_display = f"{hours:.1f}h" if hours else "0.0h"
-                print(f"{location_str:<30} {count_val:<15} {hours_display:<12}")
+                print(f"{(location or 'N/A'):<30} {(count or 0):<15} {f'{hours:.1f}h' if hours else '0.0h':<12}")
             print()
 
-        # ==================== EQUIPMENT MISSING PARTS SUMMARY ====================
+        # 6. OVERALL MAINTENANCE EFFICIENCY (PM only)
+        TOTAL_TECHNICIANS = 9
+        ANNUAL_HOURS_PER_TECHNICIAN = 1900
+        WEEKLY_AVAILABLE_HOURS = 328.85
+        MONTHLY_AVAILABLE_HOURS = 1425.0
+        TARGET_EFFICIENCY_RATE = 80.0
+
+        total_maintenance_hours = pm_total_hours + outstanding_total_hours
+        efficiency_rate = (total_maintenance_hours / MONTHLY_AVAILABLE_HOURS) * 100 if MONTHLY_AVAILABLE_HOURS > 0 else 0.0
+        efficiency_status = "MEETS TARGET" if efficiency_rate >= TARGET_EFFICIENCY_RATE else "BELOW TARGET"
+
         print()
         print("=" * 80)
-        print("EQUIPMENT WITH MISSING PARTS SUMMARY")
+        print("OVERALL MAINTENANCE EFFICIENCY")
         print("=" * 80)
         print()
-
-        # Get Equipment Missing Parts statistics
-        # Entries reported this month
-        cursor.execute('''
-            SELECT COUNT(*)
-            FROM equipment_missing_parts
-            WHERE EXTRACT(YEAR FROM reported_date::date) = %s
-            AND EXTRACT(MONTH FROM reported_date::date) = %s
-        ''', (year, month))
-
-        emp_reported = cursor.fetchone()[0] or 0
-
-        # Entries closed this month
-        cursor.execute('''
-            SELECT COUNT(*)
-            FROM equipment_missing_parts
-            WHERE EXTRACT(YEAR FROM closed_date::date) = %s
-            AND EXTRACT(MONTH FROM closed_date::date) = %s
-            AND status = 'Closed'
-        ''', (year, month))
-
-        emp_closed = cursor.fetchone()[0] or 0
-
-        # Currently open entries
-        cursor.execute('''
-            SELECT COUNT(*)
-            FROM equipment_missing_parts
-            WHERE status = 'Open'
-        ''')
-
-        emp_open_current = cursor.fetchone()[0] or 0
-
-        # Display summary statistics
-        print(f"  Entries Reported This Month: {emp_reported}")
-        print(f"  Entries Closed This Month: {emp_closed}")
-        print(f"  Currently Open Entries: {emp_open_current}")
+        print(f"  Total PM Hours (Assigned This Month): {pm_total_hours:.1f} hours")
+        print(f"  Total Outstanding PM Hours: {outstanding_total_hours:.1f} hours")
+        print(f"  Total Maintenance Hours: {total_maintenance_hours:.1f} hours")
         print()
-
-        # Detailed breakdown of entries reported this month
-        if emp_reported > 0:
-            print("=" * 100)
-            print(f"DETAILED BREAKDOWN: EQUIPMENT MISSING PARTS REPORTED IN {month_name.upper()} {year}")
-            print("=" * 100)
-            print()
-
-            cursor.execute('''
-                SELECT
-                    emp_number,
-                    bfm_equipment_no,
-                    description,
-                    missing_parts_description,
-                    priority,
-                    assigned_technician,
-                    reported_date,
-                    status
-                FROM equipment_missing_parts
-                WHERE EXTRACT(YEAR FROM reported_date::date) = %s
-                AND EXTRACT(MONTH FROM reported_date::date) = %s
-                ORDER BY reported_date
-            ''', (year, month))
-
-            reported_emps = cursor.fetchall()
-
-            for emp_data in reported_emps:
-                emp_number, equipment, description, missing_parts, priority, technician, reported_date, status = emp_data
-
-                # Format dates - handle both string and datetime objects
-                if reported_date:
-                    reported_str = reported_date.strftime('%Y-%m-%d') if hasattr(reported_date, 'strftime') else str(reported_date)[:10]
-                else:
-                    reported_str = "Unknown"
-
-                tech_name = technician if technician else "Unassigned"
-                equip_str = equipment if equipment else "N/A"
-                desc_str = (description[:60] + "...") if description and len(description) > 60 else (description or "No description")
-                priority_str = priority if priority else "N/A"
-                parts_str = (missing_parts[:80] + "...") if missing_parts and len(missing_parts) > 80 else (missing_parts or "N/A")
-                status_str = status if status else "Open"
-
-                print(f"EMP Number: {emp_number}")
-                print(f"  Priority: {priority_str}")
-                print(f"  Status: {status_str}")
-                print(f"  Equipment: {equip_str}")
-                print(f"  Description: {desc_str}")
-                print(f"  Missing Parts: {parts_str}")
-                print(f"  Reported Date: {reported_str}")
-                print(f"  Assigned Technician: {tech_name}")
-                print("-" * 100)
-                print()
-
-            print("=" * 100)
-            print()
-
-        # Detailed breakdown of entries closed this month
-        if emp_closed > 0:
-            print("=" * 100)
-            print(f"DETAILED BREAKDOWN: EQUIPMENT MISSING PARTS CLOSED IN {month_name.upper()} {year}")
-            print("=" * 100)
-            print()
-
-            cursor.execute('''
-                SELECT
-                    emp_number,
-                    bfm_equipment_no,
-                    description,
-                    missing_parts_description,
-                    priority,
-                    assigned_technician,
-                    reported_date,
-                    closed_date,
-                    closed_by
-                FROM equipment_missing_parts
-                WHERE EXTRACT(YEAR FROM closed_date::date) = %s
-                AND EXTRACT(MONTH FROM closed_date::date) = %s
-                AND status = 'Closed'
-                ORDER BY closed_date
-            ''', (year, month))
-
-            closed_emps = cursor.fetchall()
-
-            for emp_data in closed_emps:
-                emp_number, equipment, description, missing_parts, priority, technician, reported_date, closed_date, closed_by = emp_data
-
-                # Format dates
-                if reported_date:
-                    reported_str = reported_date.strftime('%Y-%m-%d') if hasattr(reported_date, 'strftime') else str(reported_date)[:10]
-                else:
-                    reported_str = "Unknown"
-
-                if closed_date:
-                    closed_str = closed_date.strftime('%Y-%m-%d') if hasattr(closed_date, 'strftime') else str(closed_date)[:10]
-                else:
-                    closed_str = "Unknown"
-
-                tech_name = technician if technician else "Unassigned"
-                equip_str = equipment if equipment else "N/A"
-                desc_str = (description[:60] + "...") if description and len(description) > 60 else (description or "No description")
-                priority_str = priority if priority else "N/A"
-                parts_str = (missing_parts[:80] + "...") if missing_parts and len(missing_parts) > 80 else (missing_parts or "N/A")
-                closer_name = closed_by if closed_by else "Unknown"
-
-                print(f"EMP Number: {emp_number}")
-                print(f"  Priority: {priority_str}")
-                print(f"  Equipment: {equip_str}")
-                print(f"  Description: {desc_str}")
-                print(f"  Missing Parts: {parts_str}")
-                print(f"  Reported Date: {reported_str}")
-                print(f"  Closed Date: {closed_str}")
-                print(f"  Assigned Technician: {tech_name}")
-                print(f"  Closed By: {closer_name}")
-                print("-" * 100)
-                print()
-
-            print("=" * 100)
-            print()
-
-        # Currently open entries
-        if emp_open_current > 0:
-            print("=" * 100)
-            print(f"CURRENTLY OPEN EQUIPMENT MISSING PARTS ENTRIES")
-            print("=" * 100)
-            print()
-
-            cursor.execute('''
-                SELECT
-                    emp_number,
-                    bfm_equipment_no,
-                    description,
-                    missing_parts_description,
-                    priority,
-                    assigned_technician,
-                    reported_date,
-                    (CURRENT_DATE - reported_date::date) as days_open
-                FROM equipment_missing_parts
-                WHERE status = 'Open'
-                ORDER BY reported_date
-            ''')
-
-            open_emps = cursor.fetchall()
-
-            for emp_data in open_emps:
-                emp_number, equipment, description, missing_parts, priority, technician, reported_date, days_open = emp_data
-
-                # Format dates
-                if reported_date:
-                    reported_str = reported_date.strftime('%Y-%m-%d') if hasattr(reported_date, 'strftime') else str(reported_date)[:10]
-                else:
-                    reported_str = "Unknown"
-
-                current_date_str = datetime.now().strftime('%Y-%m-%d')
-                tech_name = technician if technician else "Unassigned"
-                equip_str = equipment if equipment else "N/A"
-                desc_str = (description[:60] + "...") if description and len(description) > 60 else (description or "No description")
-                priority_str = priority if priority else "N/A"
-                parts_str = (missing_parts[:80] + "...") if missing_parts and len(missing_parts) > 80 else (missing_parts or "N/A")
-
-                print(f"EMP Number: {emp_number}")
-                print(f"  Priority: {priority_str}")
-                print(f"  Equipment: {equip_str}")
-                print(f"  Description: {desc_str}")
-                print(f"  Missing Parts: {parts_str}")
-                print(f"  Reported Date: {reported_str}")
-                print(f"  Days Open: {days_open} days (as of {current_date_str})")
-                print(f"  Assigned Technician: {tech_name}")
-                print("-" * 100)
-                print()
-
-            print("=" * 100)
-            print()
-
+        print(f"  Cannot Find Assets Count: {cf_count}")
+        print()
+        print(f"  Monthly Available Hours: {MONTHLY_AVAILABLE_HOURS:.1f} hours")
+        print(f"    (Based on {TOTAL_TECHNICIANS} technicians x {ANNUAL_HOURS_PER_TECHNICIAN} hours/year / 12 months)")
+        print(f"    (Weekly Available: {WEEKLY_AVAILABLE_HOURS:.2f} hours)")
+        print()
+        print(f"  Overall Efficiency Rate: {efficiency_rate:.1f}%")
+        print(f"  Target Efficiency Rate: {TARGET_EFFICIENCY_RATE:.1f}%")
+        print(f"  Status: {efficiency_status}")
         print()
 
         print("=" * 80)
         print("END OF MONTHLY SUMMARY REPORT")
         print("=" * 80)
-    
+
         log_debug("Report generation completed successfully")
         return {
             'pm_completions': pm_completions,
@@ -2755,9 +1937,6 @@ def generate_monthly_summary_report(conn, month=None, year=None):
             'cannot_find_count': cf_count,
             'run_to_failure_count': rtf_count,
             'deactivated_count': deactivated_count,
-            'cms_created': cms_created,
-            'cms_closed': cms_closed,
-            'cms_open_current': cms_open_current,
             'total_hours': pm_total_hours,
             'outstanding_hours': outstanding_total_hours,
             'avg_hours': pm_avg_hours,
@@ -2768,9 +1947,7 @@ def generate_monthly_summary_report(conn, month=None, year=None):
     except Exception as e:
         log_debug(f"ERROR OCCURRED: {type(e).__name__}: {str(e)}")
         log_debug(f"Full traceback:\n{traceback.format_exc()}")
-        # Re-raise the exception so the UI can display it
         raise
-
 def export_professional_monthly_report_pdf(conn, month=None, year=None):
         """
         Generate a professional monthly report PDF
