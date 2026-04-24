@@ -70,6 +70,14 @@ def _pg_to_sqlite(sql: str) -> str:
         '', sql
     )
 
+    # EXTRACT(field FROM col) → SQLite strftime — must run after ::TYPE stripping
+    sql = re.sub(r'\bEXTRACT\s*\(\s*YEAR\s+FROM\s+([\w.]+)\s*\)',
+                 r"CAST(strftime('%Y', \1) AS INTEGER)", sql, flags=re.IGNORECASE)
+    sql = re.sub(r'\bEXTRACT\s*\(\s*MONTH\s+FROM\s+([\w.]+)\s*\)',
+                 r"CAST(strftime('%m', \1) AS INTEGER)", sql, flags=re.IGNORECASE)
+    sql = re.sub(r'\bEXTRACT\s*\(\s*DAY\s+FROM\s+([\w.]+)\s*\)',
+                 r"CAST(strftime('%d', \1) AS INTEGER)", sql, flags=re.IGNORECASE)
+
     # GREATEST(a, b) → max(a, b)  – only where both args are non-NULL
     sql = re.sub(r'\bGREATEST\b', 'max', sql, flags=re.IGNORECASE)
 
