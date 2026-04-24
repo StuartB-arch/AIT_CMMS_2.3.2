@@ -4160,31 +4160,23 @@ class AITCMMSSystem:
         
             def generate_report():
                 """Generate and display the report"""
+                import sys
+                from io import StringIO
+                old_stdout = sys.stdout
+                sys.stdout = StringIO()
                 try:
                     month = int(month_var.get())
                     year = int(year_var.get())
-                    
-                    # Clear existing text
                     text_widget.delete('1.0', 'end')
-                    
-                    # Redirect print output to text widget
-                    import sys
-                    from io import StringIO
-                    old_stdout = sys.stdout
-                    sys.stdout = StringIO()
-            
-                    # Generate the report
                     generate_monthly_summary_report(self.conn, month, year)
-                    
-                    # Get the output and restore stdout
                     output = sys.stdout.getvalue()
-                    sys.stdout = old_stdout
-                
-                    # Display in text widget
                     text_widget.insert('1.0', output)
-                
                 except Exception as e:
+                    output = sys.stdout.getvalue()
+                    text_widget.insert('1.0', output)
                     messagebox.showerror("Error", f"Failed to generate report: {str(e)}")
+                finally:
+                    sys.stdout = old_stdout
         
             def export_report():
                 """Export report to text file"""
