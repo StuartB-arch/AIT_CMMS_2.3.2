@@ -10201,15 +10201,6 @@ class AITCMMSSystem:
                           borderwidth=0, relief='flat')
         self.root.config(menu=menubar)
 
-        account_menu = tk.Menu(menubar, tearoff=0,
-                               bg=BG_CARD, fg=TEXT_PRI,
-                               activebackground=ACCENT, activeforeground="#ffffff")
-        menubar.add_cascade(label="⚙  Account", menu=account_menu)
-        account_menu.add_command(label="Change Password",
-                                 command=self.open_change_password)
-        account_menu.add_separator()
-        account_menu.add_command(label="Logout", command=self.logout)
-
         # ── Manager toolbar ───────────────────────────────────────────────────
         if self.current_user_role == 'Manager':
             toolbar_frame = tk.Frame(self.root, bg="#dde6f0", height=46)
