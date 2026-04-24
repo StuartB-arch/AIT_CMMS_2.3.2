@@ -7563,7 +7563,6 @@ class AITCMMSSystem:
                 _ui(lambda: self.refresh_equipment_list() if hasattr(self, 'refresh_equipment_list') else None)
                 _ui(lambda: self.load_cannot_find_assets() if hasattr(self, 'load_cannot_find_assets') else None)
                 _ui(lambda: self.load_deactivated_assets() if hasattr(self, 'load_deactivated_assets') else None)
-                _ui(lambda: self.load_missing_parts_list() if hasattr(self, 'load_missing_parts_list') else None)
 
                 # 1b. MRO CSV batch upsert
                 if hasattr(self, 'mro_manager') and hasattr(self.mro_manager, 'mro_csv'):
