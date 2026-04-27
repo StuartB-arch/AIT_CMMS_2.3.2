@@ -22040,9 +22040,34 @@ class AITCMMSSystem:
                 return  # User cancelled
 
             # Create assignment tuple in the format expected by create_pm_forms_pdf
-            # Format: (bfm_no, sap_no, description, tool_id, location, master_lin, pm_type, scheduled_date, technician)
+            # Format: (bfm_no, sap_no, description, tool_id, location, master_lin,
+            #          pm_type, scheduled_date, technician, last_pm_date)
             scheduled_date = datetime.now().strftime('%Y-%m-%d')
-            assignment = (bfm_no, sap_no, description, tool_id, location, master_lin, selected_pm_type, scheduled_date, 'To Be Assigned')
+
+            # Pick the correct last-PM date for the selected PM type.
+            # equipment_data column order (from show_equipment_pm_actions_dialog query):
+            #   0:sap 1:bfm 2:desc 3:tool_id 4:location 5:master_lin 6:weekly_pm
+            #   7:monthly_pm 8:six_month_pm 9:annual_pm 10:last_weekly 11:last_monthly
+            #   12:last_six_month 13:last_annual ...
+            _pm_date_idx = {
+                'Weekly': 10, 'Monthly': 11, 'Six Month': 12, 'Annual': 13,
+            }
+            try:
+                _idx = _pm_date_idx.get(selected_pm_type)
+                last_pm_date = str(equipment_data[_idx] or '') if _idx is not None else ''
+            except (IndexError, TypeError):
+                last_pm_date = ''
+
+            # Fill blank location from CSV if needed
+            if not location and hasattr(self, 'csv_manager'):
+                try:
+                    _loc_map = self.csv_manager.get_location_map()
+                    location = _loc_map.get(str(bfm_no), '') or location
+                except Exception:
+                    pass
+
+            assignment = (bfm_no, sap_no, description, tool_id, location, master_lin,
+                          selected_pm_type, scheduled_date, 'To Be Assigned', last_pm_date)
 
             # Use the standard PM form creation function
             self.create_pm_forms_pdf(file_path, 'To Be Assigned', [assignment])
@@ -22526,9 +22551,19 @@ class AITCMMSSystem:
             # Create subdirectory for this week's forms
             week_dir = os.path.join(forms_dir, f"PM_Forms_Week_{week_start}_{timestamp}")
             os.makedirs(week_dir, exist_ok=True)
-        
+
+            # Load location map from CSV as authoritative fallback for any
+            # equipment whose location column is blank in the database.
+            csv_locations = {}
+            if hasattr(self, 'csv_manager'):
+                try:
+                    csv_locations = self.csv_manager.get_location_map()
+                    print(f"[PrintPM] Loaded {len(csv_locations)} locations from CSV")
+                except Exception as _loc_err:
+                    print(f"[PrintPM] WARNING: could not load CSV locations: {_loc_err}")
+
             cursor = self.conn.cursor()
-        
+
             # Generate forms for each technician
             for technician in self.technicians:
                 cursor.execute('''
@@ -22538,15 +22573,33 @@ class AITCMMSSystem:
                            COALESCE(e.tool_id_drawing_no, '') AS tool_id_drawing_no,
                            COALESCE(e.location, '') AS location,
                            COALESCE(e.master_lin, '') AS master_lin,
-                           ws.pm_type, ws.scheduled_date, ws.assigned_technician
+                           ws.pm_type, ws.scheduled_date, ws.assigned_technician,
+                           COALESCE(
+                               CASE ws.pm_type
+                                   WHEN 'Monthly'   THEN e.last_monthly_pm
+                                   WHEN 'Six Month' THEN e.last_six_month_pm
+                                   WHEN 'Annual'    THEN e.last_annual_pm
+                                   WHEN 'Weekly'    THEN e.last_weekly_pm
+                                   ELSE NULL
+                               END,
+                           '') AS last_pm_date
                     FROM weekly_pm_schedules ws
                     LEFT JOIN equipment e ON ws.bfm_equipment_no = e.bfm_equipment_no
                     WHERE ws.assigned_technician = %s AND ws.week_start_date = %s
                     ORDER BY ws.scheduled_date
                 ''', (technician, week_start))
-            
-                assignments = cursor.fetchall()
-            
+
+                raw_rows = cursor.fetchall()
+
+                # Fill in locations that are blank in the DB using the CSV map.
+                assignments = []
+                for row in raw_rows:
+                    row_list = list(row)
+                    bfm_no = row_list[0]
+                    if not row_list[4] and bfm_no in csv_locations:
+                        row_list[4] = csv_locations[bfm_no]
+                    assignments.append(tuple(row_list))
+
                 if assignments:
                     # Create PDF for this technician
                     filename = os.path.join(week_dir, f"{technician.replace(' ', '_')}_PM_Forms.pdf")
@@ -22554,7 +22607,7 @@ class AITCMMSSystem:
 
             messagebox.showinfo("Success", f"PM forms generated in directory: {week_dir}")
             self.update_status(f"PM forms generated for week {week_start}")
-        
+
         except Exception as e:
             messagebox.showerror("Error", f"Failed to generate PM forms: {str(e)}")
     
@@ -22606,9 +22659,16 @@ class AITCMMSSystem:
                     print(f"DEBUG: Skipping invalid assignment {i}")
                     continue
 
-            # Extract variables from assignment
-                bfm_no, sap_no, description, tool_id, location, master_lin, pm_type, scheduled_date, assigned_tech = assignment
-        
+            # Extract variables from assignment.
+            # Tuple layout (9 items minimum, 10th is last_pm_date when available):
+            #   bfm_no, sap_no, description, tool_id, location, master_lin,
+            #   pm_type, scheduled_date, assigned_tech [, last_pm_date]
+                if len(assignment) >= 10:
+                    bfm_no, sap_no, description, tool_id, location, master_lin, pm_type, scheduled_date, assigned_tech, last_pm_date = assignment
+                else:
+                    bfm_no, sap_no, description, tool_id, location, master_lin, pm_type, scheduled_date, assigned_tech = assignment
+                    last_pm_date = ''
+
             # Add None checks for all variables
                 bfm_no = bfm_no or ''
                 sap_no = sap_no or ''
@@ -22619,6 +22679,7 @@ class AITCMMSSystem:
                 pm_type = pm_type or 'Monthly'
                 scheduled_date = scheduled_date or ''
                 assigned_tech = assigned_tech or technician
+                last_pm_date = last_pm_date or ''
         
                 print(f"DEBUG: Processing {bfm_no} - {pm_type}")
 
@@ -22759,9 +22820,9 @@ class AITCMMSSystem:
                         Paragraph(str(description), cell_style)
                     ],
                     [
-                        Paragraph('Date of Last PM:', header_cell_style), 
-                        Paragraph('', cell_style), 
-                        Paragraph('Location of Equipment:', header_cell_style), 
+                        Paragraph('Date of Last PM:', header_cell_style),
+                        Paragraph(str(last_pm_date), cell_style),
+                        Paragraph('Location of Equipment:', header_cell_style),
                         Paragraph(str(location), cell_style)
                     ],
                     [

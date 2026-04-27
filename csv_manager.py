@@ -411,6 +411,30 @@ class CSVManager:
             print(f"[CSVManager] ERROR updating PM dates for {bfm_no}: {exc}")
             return False
 
+    # ── Location map ─────────────────────────────────────────────────────────
+
+    def get_location_map(self) -> dict:
+        """
+        Return {bfm_no: location} for every row in the CSV.
+        Used as a fast fallback when the equipment table has a blank location.
+        Rows with no BFM number are skipped; rows with a blank location are
+        included so callers can distinguish "not in CSV" from "CSV says blank".
+        """
+        if not self.path.exists():
+            return {}
+        try:
+            df = pd.read_csv(self.path, encoding="utf-8-sig", dtype=str)
+            df.columns = df.columns.str.strip()
+            result = {}
+            for _, row in df.iterrows():
+                bfm_no = _safe_str(row.get("BFM Equipment No", ""))
+                if bfm_no:
+                    result[bfm_no] = _safe_str(row.get("Location", ""))
+            return result
+        except Exception as exc:
+            print(f"[CSVManager] ERROR reading location map: {exc}")
+            return {}
+
     # ── Single-row live sync ──────────────────────────────────────────────────
 
     def sync_equipment_row(self, bfm_no: str) -> bool:
