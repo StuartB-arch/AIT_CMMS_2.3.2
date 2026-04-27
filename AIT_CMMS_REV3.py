@@ -5880,7 +5880,39 @@ class AITCMMSSystem:
             (template_id, bfm_no, template_name, pm_type, checklist_json,
             special_instructions, safety_notes, estimated_hours, created_date, updated_date,
             sap_no, description, tool_id, location) = template_data
-        
+
+            # Look up the last PM date from the equipment table, falling back
+            # to pm_completions if the equipment record has no date recorded.
+            try:
+                _cur = self.conn.cursor()
+                _pm_col = {
+                    'Monthly': 'last_monthly_pm', 'Six Month': 'last_six_month_pm',
+                    'Annual': 'last_annual_pm',   'Weekly': 'last_weekly_pm',
+                }.get(pm_type, 'last_monthly_pm')
+                _cur.execute(
+                    f"SELECT COALESCE({_pm_col}, '') FROM equipment WHERE bfm_equipment_no = %s",
+                    (bfm_no,)
+                )
+                _row = _cur.fetchone()
+                last_pm_date = str(_row[0]) if _row and _row[0] else ''
+                if not last_pm_date:
+                    _cur.execute(
+                        "SELECT MAX(completion_date) FROM pm_completions "
+                        "WHERE bfm_equipment_no = %s AND pm_type = %s",
+                        (bfm_no, pm_type)
+                    )
+                    _row2 = _cur.fetchone()
+                    last_pm_date = str(_row2[0]) if _row2 and _row2[0] else ''
+            except Exception:
+                last_pm_date = ''
+
+            # Fill blank location from CSV if needed
+            if not location and hasattr(self, 'csv_manager'):
+                try:
+                    location = self.csv_manager.get_location_map().get(str(bfm_no), '') or ''
+                except Exception:
+                    pass
+
             # Custom styles
             cell_style = ParagraphStyle(
                 'CellStyle',
@@ -5889,7 +5921,7 @@ class AITCMMSSystem:
                 leading=10,
                 wordWrap='LTR'
             )
-        
+
             header_cell_style = ParagraphStyle(
                 'HeaderCellStyle',
                 parent=styles['Normal'],
@@ -5898,7 +5930,7 @@ class AITCMMSSystem:
                 leading=11,
                 wordWrap='LTR'
             )
-        
+
             company_style = ParagraphStyle(
                 'CompanyStyle',
                 parent=styles['Heading1'],
@@ -5907,56 +5939,56 @@ class AITCMMSSystem:
                 alignment=1,
                 textColor=colors.darkblue
             )
-        
+
             # Header
             story.append(Paragraph("AIT - BUILDING THE FUTURE OF AEROSPACE", company_style))
             story.append(Spacer(1, 15))
-        
+
             # Equipment information table
             equipment_data = [
                 [
-                    Paragraph('(SAP) Material Number:', header_cell_style), 
-                    Paragraph(str(sap_no or ''), cell_style), 
-                    Paragraph('Tool ID / Drawing Number:', header_cell_style), 
+                    Paragraph('(SAP) Material Number:', header_cell_style),
+                    Paragraph(str(sap_no or ''), cell_style),
+                    Paragraph('Tool ID / Drawing Number:', header_cell_style),
                     Paragraph(str(tool_id or ''), cell_style)
                 ],
                 [
-                    Paragraph('(BFM) Equipment Number:', header_cell_style), 
-                    Paragraph(str(bfm_no), cell_style), 
-                    Paragraph('Description of Equipment:', header_cell_style), 
+                    Paragraph('(BFM) Equipment Number:', header_cell_style),
+                    Paragraph(str(bfm_no), cell_style),
+                    Paragraph('Description of Equipment:', header_cell_style),
                     Paragraph(str(description or ''), cell_style)
                 ],
                 [
-                    Paragraph('Custom Template:', header_cell_style), 
-                    Paragraph(str(template_name), cell_style), 
-                    Paragraph('Location of Equipment:', header_cell_style), 
+                    Paragraph('Date of Last PM:', header_cell_style),
+                    Paragraph(str(last_pm_date), cell_style),
+                    Paragraph('Location of Equipment:', header_cell_style),
                     Paragraph(str(location or ''), cell_style)
                 ],
                 [
-                    Paragraph('Maintenance Technician:', header_cell_style), 
-                    Paragraph('', cell_style), 
-                    Paragraph('PM Cycle:', header_cell_style), 
+                    Paragraph('Maintenance Technician:', header_cell_style),
+                    Paragraph('', cell_style),
+                    Paragraph('PM Cycle:', header_cell_style),
                     Paragraph(str(pm_type), cell_style)
                 ],
                 [
-                    Paragraph('Estimated Hours:', header_cell_style), 
-                    Paragraph(f'{estimated_hours:.1f}h', cell_style), 
-                    Paragraph('Date of Current PM:', header_cell_style), 
+                    Paragraph('Estimated Hours:', header_cell_style),
+                    Paragraph(f'{estimated_hours:.1f}h', cell_style),
+                    Paragraph('Date of PM Completion:', header_cell_style),
                     Paragraph('', cell_style)
                 ]
             ]
-        
+
             if safety_notes:
                 equipment_data.append([
-                    Paragraph(f'SAFETY: {safety_notes}', cell_style), 
+                    Paragraph(f'SAFETY: {safety_notes}', cell_style),
                     '', '', ''
                 ])
-        
+
             equipment_data.append([
-                Paragraph(f'Printed: {datetime.now().strftime("%m/%d/%Y")}', cell_style), 
+                Paragraph(f'Printed: {datetime.now().strftime("%m/%d/%Y")}', cell_style),
                 '', '', ''
             ])
-        
+
             equipment_table = Table(equipment_data, colWidths=[1.8*inch, 1.7*inch, 1.8*inch, 1.7*inch])
             equipment_table.setStyle(TableStyle([
                 ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
@@ -8878,7 +8910,39 @@ class AITCMMSSystem:
             (template_id, bfm_no, template_name, pm_type, checklist_json,
             special_instructions, safety_notes, estimated_hours, created_date, updated_date,
             sap_no, description, tool_id, location) = template_data
-        
+
+            # Look up the last PM date from the equipment table, falling back
+            # to pm_completions if the equipment record has no date recorded.
+            try:
+                _cur = self.conn.cursor()
+                _pm_col = {
+                    'Monthly': 'last_monthly_pm', 'Six Month': 'last_six_month_pm',
+                    'Annual': 'last_annual_pm',   'Weekly': 'last_weekly_pm',
+                }.get(pm_type, 'last_monthly_pm')
+                _cur.execute(
+                    f"SELECT COALESCE({_pm_col}, '') FROM equipment WHERE bfm_equipment_no = %s",
+                    (bfm_no,)
+                )
+                _row = _cur.fetchone()
+                last_pm_date = str(_row[0]) if _row and _row[0] else ''
+                if not last_pm_date:
+                    _cur.execute(
+                        "SELECT MAX(completion_date) FROM pm_completions "
+                        "WHERE bfm_equipment_no = %s AND pm_type = %s",
+                        (bfm_no, pm_type)
+                    )
+                    _row2 = _cur.fetchone()
+                    last_pm_date = str(_row2[0]) if _row2 and _row2[0] else ''
+            except Exception:
+                last_pm_date = ''
+
+            # Fill blank location from CSV if needed
+            if not location and hasattr(self, 'csv_manager'):
+                try:
+                    location = self.csv_manager.get_location_map().get(str(bfm_no), '') or ''
+                except Exception:
+                    pass
+
             # Custom styles
             cell_style = ParagraphStyle(
                 'CellStyle',
@@ -8887,7 +8951,7 @@ class AITCMMSSystem:
                 leading=10,
                 wordWrap='LTR'
             )
-        
+
             header_cell_style = ParagraphStyle(
                 'HeaderCellStyle',
                 parent=styles['Normal'],
@@ -8896,7 +8960,7 @@ class AITCMMSSystem:
                 leading=11,
                 wordWrap='LTR'
             )
-        
+
             company_style = ParagraphStyle(
                 'CompanyStyle',
                 parent=styles['Heading1'],
@@ -8905,56 +8969,56 @@ class AITCMMSSystem:
                 alignment=1,
                 textColor=colors.darkblue
             )
-        
+
             # Header
             story.append(Paragraph("AIT - BUILDING THE FUTURE OF AEROSPACE", company_style))
             story.append(Spacer(1, 15))
-        
+
             # Equipment information table
             equipment_data = [
                 [
-                    Paragraph('(SAP) Material Number:', header_cell_style), 
-                    Paragraph(str(sap_no or ''), cell_style), 
-                    Paragraph('Tool ID / Drawing Number:', header_cell_style), 
+                    Paragraph('(SAP) Material Number:', header_cell_style),
+                    Paragraph(str(sap_no or ''), cell_style),
+                    Paragraph('Tool ID / Drawing Number:', header_cell_style),
                     Paragraph(str(tool_id or ''), cell_style)
                 ],
                 [
-                    Paragraph('(BFM) Equipment Number:', header_cell_style), 
-                    Paragraph(str(bfm_no), cell_style), 
-                    Paragraph('Description of Equipment:', header_cell_style), 
+                    Paragraph('(BFM) Equipment Number:', header_cell_style),
+                    Paragraph(str(bfm_no), cell_style),
+                    Paragraph('Description of Equipment:', header_cell_style),
                     Paragraph(str(description or ''), cell_style)
                 ],
                 [
-                    Paragraph('Custom Template:', header_cell_style), 
-                    Paragraph(str(template_name), cell_style), 
-                    Paragraph('Location of Equipment:', header_cell_style), 
+                    Paragraph('Date of Last PM:', header_cell_style),
+                    Paragraph(str(last_pm_date), cell_style),
+                    Paragraph('Location of Equipment:', header_cell_style),
                     Paragraph(str(location or ''), cell_style)
                 ],
                 [
-                    Paragraph('Maintenance Technician:', header_cell_style), 
-                    Paragraph('', cell_style), 
-                    Paragraph('PM Cycle:', header_cell_style), 
+                    Paragraph('Maintenance Technician:', header_cell_style),
+                    Paragraph('', cell_style),
+                    Paragraph('PM Cycle:', header_cell_style),
                     Paragraph(str(pm_type), cell_style)
                 ],
                 [
-                    Paragraph('Estimated Hours:', header_cell_style), 
-                    Paragraph(f'{estimated_hours:.1f}h', cell_style), 
-                    Paragraph('Date of Current PM:', header_cell_style), 
+                    Paragraph('Estimated Hours:', header_cell_style),
+                    Paragraph(f'{estimated_hours:.1f}h', cell_style),
+                    Paragraph('Date of PM Completion:', header_cell_style),
                     Paragraph('', cell_style)
                 ]
             ]
-        
+
             if safety_notes:
                 equipment_data.append([
-                    Paragraph(f'SAFETY: {safety_notes}', cell_style), 
+                    Paragraph(f'SAFETY: {safety_notes}', cell_style),
                     '', '', ''
                 ])
-        
+
             equipment_data.append([
-                Paragraph(f'Printed: {datetime.now().strftime("%m/%d/%Y")}', cell_style), 
+                Paragraph(f'Printed: {datetime.now().strftime("%m/%d/%Y")}', cell_style),
                 '', '', ''
             ])
-        
+
             equipment_table = Table(equipment_data, colWidths=[1.8*inch, 1.7*inch, 1.8*inch, 1.7*inch])
             equipment_table.setStyle(TableStyle([
                 ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
@@ -22582,6 +22646,10 @@ class AITCMMSSystem:
                                    WHEN 'Weekly'    THEN e.last_weekly_pm
                                    ELSE NULL
                                END,
+                               (SELECT MAX(pc.completion_date)
+                                FROM pm_completions pc
+                                WHERE pc.bfm_equipment_no = ws.bfm_equipment_no
+                                  AND pc.pm_type = ws.pm_type),
                            '') AS last_pm_date
                     FROM weekly_pm_schedules ws
                     LEFT JOIN equipment e ON ws.bfm_equipment_no = e.bfm_equipment_no
