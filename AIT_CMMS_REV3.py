@@ -1272,14 +1272,16 @@ class PMSchedulingService:
         sorted_keys = sorted(sap_groups.keys(), key=group_sort_key)
 
         # --- 3. Preload most recent technician assignment per BFM (for rotation) ---
+        # Returns (tech, week_start_date) so we can find the most-recently-assigned tech
+        # across all BFMs in a SAP group, even when BFMs have different individual histories.
         all_bfm_nos = list({a.bfm_no for a in assignments})
-        last_tech_per_bfm: Dict[str, str] = {}
+        last_tech_per_bfm: Dict[str, tuple] = {}
         if all_bfm_nos:
             placeholders = ','.join(['%s'] * len(all_bfm_nos))
             cursor.execute(f'''
-                SELECT bfm_equipment_no, assigned_technician
+                SELECT bfm_equipment_no, assigned_technician, week_start_date
                 FROM (
-                    SELECT bfm_equipment_no, assigned_technician,
+                    SELECT bfm_equipment_no, assigned_technician, week_start_date,
                         ROW_NUMBER() OVER (PARTITION BY bfm_equipment_no ORDER BY week_start_date DESC, id DESC) as rn
                     FROM weekly_pm_schedules
                     WHERE bfm_equipment_no IN ({placeholders})
@@ -1289,7 +1291,7 @@ class PMSchedulingService:
                 ) ranked
                 WHERE rn = 1
             ''', all_bfm_nos + [week_start_str])
-            last_tech_per_bfm = {row[0]: row[1] for row in cursor.fetchall()}
+            last_tech_per_bfm = {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
 
         # --- 4. Assign each group to one technician and build insert batch ---
         batch_insert_data = []
@@ -1301,13 +1303,20 @@ class PMSchedulingService:
         for sap_key in sorted_keys:
             group = sap_groups[sap_key]
 
-            # Determine last technician for this SAP group
-            group_tech_history = [last_tech_per_bfm[b] for b in (a.bfm_no for a in group)
-                                  if b in last_tech_per_bfm]
+            # Determine last technician for this SAP group.
+            # Use the most recently assigned tech across ALL BFMs in the group
+            # (week_start_date comparison — ISO strings sort lexicographically).
+            bfm_histories = [
+                (last_tech_per_bfm[b][0], last_tech_per_bfm[b][1])
+                for b in (a.bfm_no for a in group)
+                if b in last_tech_per_bfm
+            ]
 
-            if group_tech_history:
-                # Resolve stored name via normalised lookup (handles case/whitespace drift)
-                last_tech = tech_name_map.get(group_tech_history[0].strip().lower())
+            if bfm_histories:
+                # Pick the tech from the most recently scheduled BFM in the group,
+                # then rotate to the next technician for this week.
+                most_recent_tech_raw, _ = max(bfm_histories, key=lambda x: x[1])
+                last_tech = tech_name_map.get(most_recent_tech_raw.strip().lower())
                 if last_tech is not None:
                     tech_idx = (self.technicians.index(last_tech) + 1) % len(self.technicians)
                 else:
