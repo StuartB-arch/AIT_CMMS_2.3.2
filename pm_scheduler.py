@@ -42,7 +42,7 @@ class Equipment:
     last_six_month_date: Optional[str]
     last_annual_date: Optional[str]
     status: str
-    priority: int = 99  # Default priority for assets not in priority lists
+    priority: int = 4   # Default priority: P4 for assets not in P1/P2/P3 lists
 
 
 @dataclass
@@ -758,20 +758,21 @@ class PMAssignmentGenerator:
         print(f"DEBUG: Finished processing all {total_equipment} equipment items")
         print(f"DEBUG: Found {len(potential_assignments)} potential assignments")
 
-        # Sort by: 1) Custom template (True first), 2) Equipment priority, 3) Priority score
-        print(f"DEBUG: Sorting assignments by priority...")
-        print(f"DEBUG: Custom template count: {sum(1 for x in potential_assignments if x.has_custom_template)}")
+        # Sort: P1 (1) → P2 (2) → P3 (3) → P4 (4); within each tier, most-overdue first
+        print(f"DEBUG: Sorting assignments by priority (P1→P2→P3→P4, then by days overdue)...")
         potential_assignments.sort(
             key=lambda x: (
-                not x.has_custom_template,  # False (custom) comes before True (no custom)
-                equipment_priority_map.get(x.bfm_no, 99),  # Equipment priority (1, 2, 3, 99)
-                -x.priority_score  # Priority score (higher is better, so negate)
+                equipment_priority_map.get(x.bfm_no, 4),  # P1=1, P2=2, P3=3, P4=4
+                -x.priority_score  # Within tier: higher score = more overdue = scheduled first
             )
         )
 
-        # Log some statistics
-        custom_count = sum(1 for x in potential_assignments if x.has_custom_template)
-        print(f"DEBUG: Prioritized {custom_count} PMs with custom templates")
+        # Log priority breakdown
+        for tier in (1, 2, 3, 4):
+            n = sum(1 for x in potential_assignments
+                    if equipment_priority_map.get(x.bfm_no, 4) == tier)
+            if n:
+                print(f"DEBUG:   P{tier}: {n} eligible PM(s)")
         print(f"DEBUG: Returning top {max_assignments} assignments")
 
         return potential_assignments[:max_assignments]
@@ -840,7 +841,8 @@ class PMSchedulingService:
                             print(f"Warning: Could not convert BFM value '{bfm}' in {filename}: {e}")
                             continue
 
-                    print(f"Loaded {len([b for b in df['BFM'].dropna() if pd.notna(b)])} priority {priority} assets from {filename}")
+                    count = len([b for b in df['BFM'].dropna() if pd.notna(b)])
+                    print(f"Loaded {count} P{priority} assets from {filename}")
 
                 except Exception as e:
                     print(f"Error loading {filename}: {e}")
@@ -895,7 +897,7 @@ class PMSchedulingService:
         equipment_list = []
         for row in cursor.fetchall():
             bfm_no = row[0]
-            priority = self.priority_map.get(str(bfm_no), 99)
+            priority = self.priority_map.get(str(bfm_no), 4)
 
             equipment_list.append(Equipment(
                 bfm_no=bfm_no,
