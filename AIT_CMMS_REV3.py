@@ -14723,15 +14723,16 @@ class AITCMMSSystem:
                     # If date parsing fails, flag it as potential issue
                     issues.append(f"WARNING: Date parsing issue with previous completion: {last_completion_date}")
 
-            # Check 2: Same technician completing SAME PM TYPE on same equipment too frequently  
+            # Check 2: Same technician completing SAME PM TYPE on same equipment too frequently
+            threshold_7d = (datetime.strptime(completion_date, '%Y-%m-%d') - timedelta(days=7)).strftime('%Y-%m-%d')
             cursor.execute('''
-                SELECT COUNT(*) 
-                FROM pm_completions 
-                WHERE bfm_equipment_no = %s 
+                SELECT COUNT(*)
+                FROM pm_completions
+                WHERE bfm_equipment_no = %s
                 AND technician_name = %s
                 AND pm_type = %s
-                AND completion_date::date >= %s::date - INTERVAL '7 days'
-            ''', (bfm_no, technician, pm_type, completion_date))
+                AND completion_date >= %s
+            ''', (bfm_no, technician, pm_type, threshold_7d))
         
             recent_count = cursor.fetchone()[0]
             if recent_count > 0:
