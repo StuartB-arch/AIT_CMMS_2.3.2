@@ -41,6 +41,16 @@ def _pg_to_sqlite(sql: str) -> str:
         r'(\w+)::(?:date|DATE|timestamp|TIMESTAMP)\s*\+\s*INTERVAL\s*\'(\d+)\s*days?\'',
         r"date(\1, '+\2 days')", sql
     )
+    # %s::date - INTERVAL 'N days' → date(%s, '-N days')
+    sql = re.sub(
+        r'%s::(?:date|DATE|timestamp|TIMESTAMP)\s*-\s*INTERVAL\s*\'(\d+)\s*days?\'',
+        r"date(%s, '-\1 days')", sql
+    )
+    # col::date - INTERVAL 'N days' → date(col, '-N days')
+    sql = re.sub(
+        r'(\w+)::(?:date|DATE|timestamp|TIMESTAMP)\s*-\s*INTERVAL\s*\'(\d+)\s*days?\'',
+        r"date(\1, '-\2 days')", sql
+    )
     # CURRENT_DATE - INTERVAL 'N days' → date('now', '-N days')
     sql = re.sub(
         r'CURRENT_DATE\s*-\s*INTERVAL\s*\'(\d+)\s*days?\'',
