@@ -148,7 +148,7 @@ class Equipment:
     last_six_month_date: Optional[str]
     last_annual_date: Optional[str]
     status: str
-    priority: int = 99  # Default priority for assets not in priority lists
+    priority: int = 4   # Default priority: P4 for assets not in P1/P2/P3 lists
     sap_no: str = ""    # SAP material number for group-based technician assignment
 
 @dataclass
@@ -166,7 +166,7 @@ class PMAssignment:
     priority_score: int
     reason: str
     sap_no: str = ""            # SAP material number (assets with same SAP go to same tech)
-    equipment_priority: int = 99  # P1/P2/P3/P4 for group sorting
+    equipment_priority: int = 4   # P1/P2/P3/P4 for group sorting (P4 is default)
 
 class PMEligibilityResult(NamedTuple):
     status: PMStatus
@@ -947,16 +947,21 @@ class PMAssignmentGenerator:
         print(f"DEBUG:   Skipped (higher PM assigned):{rejection_counts['skipped_lower_pm']}")
         print(f"DEBUG:   Inactive equipment:          {rejection_counts['inactive']}")
 
-        # Sort by priority level first (P1, P2, P3, then others), then by priority_score (days overdue)
-        # Priority level: 1 (P1) comes first, then 2 (P2), then 3 (P3), then 99 (others)
-        # Within each priority level, sort by priority_score (higher = more overdue)
-        print(f"DEBUG: Sorting assignments by priority...")
+        # Sort: P1 (1) → P2 (2) → P3 (3) → P4 (4); within each tier, most-overdue first
+        print(f"DEBUG: Sorting assignments by priority (P1→P2→P3→P4, then by days overdue)...")
         potential_assignments.sort(
             key=lambda x: (
-                equipment_priority_map.get(x.bfm_no, 99),  # Sort by priority level (1, 2, 3, 99)
-                -x.priority_score  # Then by priority score (negative for descending order)
+                equipment_priority_map.get(x.bfm_no, 4),  # P1=1, P2=2, P3=3, P4=4
+                -x.priority_score  # Within tier: higher score = more overdue = scheduled first
             )
         )
+
+        # Log priority breakdown
+        for tier in (1, 2, 3, 4):
+            n = sum(1 for x in potential_assignments
+                    if equipment_priority_map.get(x.bfm_no, 4) == tier)
+            if n:
+                print(f"DEBUG:   P{tier}: {n} eligible PM(s)")
 
         # Return all potential assignments (no hard slice here).
         # The SAP-group assignment logic in _assign_and_save() handles the soft weekly target,
@@ -1201,8 +1206,8 @@ class PMSchedulingService:
         equipment_list = []
         for row in cursor.fetchall():
             bfm_no = row[0]
-            # Get priority from priority_map, default to 99 if not found
-            priority = self.priority_map.get(str(bfm_no), 99)
+            # Get priority from priority_map; assets not in P1/P2/P3 lists default to P4
+            priority = self.priority_map.get(str(bfm_no), 4)
 
             equipment_list.append(Equipment(
                 bfm_no=bfm_no,
@@ -22283,12 +22288,26 @@ class AITCMMSSystem:
                         f"Skydrol hydraulic PM tasks added: {skydrol_added}"
                     )
                 else:
+                    # Build priority breakdown from scheduled assignments
+                    assignments_list = result.get('assignments', [])
+                    p1 = sum(1 for a in assignments_list if a.get('priority_score', 0) and
+                             pm_service.priority_map.get(str(a.get('bfm_no', '')), 4) == 1)
+                    p2 = sum(1 for a in assignments_list if
+                             pm_service.priority_map.get(str(a.get('bfm_no', '')), 4) == 2)
+                    p3 = sum(1 for a in assignments_list if
+                             pm_service.priority_map.get(str(a.get('bfm_no', '')), 4) == 3)
+                    p4 = sum(1 for a in assignments_list if
+                             pm_service.priority_map.get(str(a.get('bfm_no', '')), 4) == 4)
+                    priority_summary = (
+                        f"  P1: {p1}  |  P2: {p2}  |  P3: {p3}  |  P4: {p4}"
+                        if (p1 + p2 + p3 + p4) else ""
+                    )
                     messagebox.showinfo(
-                        "NEW SYSTEM - Scheduling Complete",
+                        "Scheduling Complete",
                         f"Generated {result['total_assignments']} PM assignments for week {week_start}\n\n"
-                        f"Unique assets: {result['unique_assets']}\n\n"
-                        f"Skydrol hydraulic PM tasks added: {skydrol_added}\n\n"
-                        f"This new system prevents duplicate assignments!"
+                        f"Priority breakdown:\n{priority_summary}\n\n"
+                        f"Unique assets: {result['unique_assets']}\n"
+                        f"Skydrol hydraulic PM tasks added: {skydrol_added}"
                     )
 
                 # Refresh displays – wrapped in its own handler so a display
