@@ -19,6 +19,7 @@ from password_change_ui import show_password_change_dialog
 from backup_ui import BackupUI
 from csv_manager import CSVManager
 from cm_manager__1_ import CMManagerPanel, init_db as cm_init_db
+from parts_order_module import PartsOrderPanel
 import shutil
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -10449,7 +10450,20 @@ class AITCMMSSystem:
         self.create_deactivated_tab()
         self.create_custom_pm_templates_tab()
         self.mro_manager.create_mro_tab(self.notebook)
+        self.create_parts_orders_tab()
         self.create_cm_manager_tab()
+
+    def create_parts_orders_tab(self):
+        """Embed the Parts Orders / Purchase Requisition form as a notebook tab."""
+        po_frame = ttk.Frame(self.notebook)
+        self.notebook.add(po_frame, text="Parts Orders")
+        try:
+            panel = PartsOrderPanel(po_frame)
+            panel.pack(fill="both", expand=True)
+        except Exception as e:
+            import tkinter as tk
+            tk.Label(po_frame, text=f"Parts Orders failed to load:\n{e}",
+                     font=('Segoe UI', 11)).pack(expand=True)
 
     def create_cm_manager_tab(self):
         """Embed the CM Manager as a full-featured notebook tab."""
