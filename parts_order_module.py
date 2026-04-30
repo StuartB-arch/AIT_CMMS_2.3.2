@@ -327,7 +327,7 @@ class PartsOrderPanel(tk.Frame):
         ws["B5"] = SHIP_TO
 
         job_id = self.job_id_var.get()
-        ws["A6"] = f"Job ID Parent :13382-ABA  |  Sub-Job: {job_id}"
+        ws["A6"] = f"Job ID Parent :13382-ABA-{job_id}"
 
         # ── Line items (rows 7-29) ───────────────────────────────────────────
         for row_idx, rw in enumerate(self._rows):
