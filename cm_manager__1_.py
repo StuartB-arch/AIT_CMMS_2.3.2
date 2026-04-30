@@ -37,6 +37,7 @@ def init_db():
             time             TEXT,
             andon            TEXT,
             event_id         TEXT,
+            bfm_number       TEXT,
             station          TEXT,
             user             TEXT,
             criticality      TEXT,
@@ -50,10 +51,12 @@ def init_db():
             notes            TEXT,
             created_at       TEXT DEFAULT (datetime('now'))
         )""")
-        # Migrate existing databases that don't have root_cause yet
+        # Migrate existing databases
         cols = [r[1] for r in conn.execute("PRAGMA table_info(cms)").fetchall()]
         if "root_cause" not in cols:
             conn.execute("ALTER TABLE cms ADD COLUMN root_cause TEXT DEFAULT ''")
+        if "bfm_number" not in cols:
+            conn.execute("ALTER TABLE cms ADD COLUMN bfm_number TEXT DEFAULT ''")
         conn.commit()
     backfill_resolution_times()
 
@@ -308,7 +311,7 @@ class EntryForm(tk.Frame):
 
         r2 = tk.Frame(sec, bg=BG3); r2.pack(fill="x", pady=3)
         self._field(r2, "Event ID", 0); self._field(r2, "Station / Equipment *", 1)
-        self._field(r2, "User / Reporter *", 2)
+        self._field(r2, "User / Reporter *", 2); self._field(r2, "BFM Number", 3)
 
         r3 = tk.Frame(sec, bg=BG3); r3.pack(fill="x", pady=3)
         label(r3, "Comments *", fg=TEXT_DIM).grid(row=0, column=0, sticky="nw", padx=(0,6))
@@ -426,11 +429,12 @@ class EntryForm(tk.Frame):
         with get_conn() as conn:
             conn.execute("""
             INSERT INTO cms
-            (date,time,andon,event_id,station,user,criticality,comments,
+            (date,time,andon,event_id,bfm_number,station,user,criticality,comments,
              ack_date,ack_time,resolved_date,resolve_time,resolution_time,root_cause,notes)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (self._v("Date *"), self._v("Time *"), self._v("Andon Level *"),
-             self._v("Event ID"), self._v("Station / Equipment *"),
+             self._v("Event ID"), self._v("BFM Number"),
+             self._v("Station / Equipment *"),
              self._v("User / Reporter *"), self._v("Criticality *"),
              self._v("Comments *"), self._v("Acknowledge Date"),
              self._v("Acknowledge Time"), self._v("Resolved Date"),
@@ -443,11 +447,11 @@ class EntryForm(tk.Frame):
 
 # ─── Records Table ─────────────────────────────────────────────────────────────
 
-COLS = ("Date","Time","Andon","Event ID","Station","User",
+COLS = ("Date","Time","Andon","Event ID","BFM #","Station","User",
         "Priority","Root Cause","Comments","Ack Date","Ack Time",
         "Resolved Date","Resolve Time","Res. Time","Notes")
 
-COL_W = [85,75,65,95,90,120,55,90,280,85,75,90,85,65,160]
+COL_W = [85,75,65,95,90,90,120,55,90,280,85,75,90,85,65,160]
 
 class RecordsView(tk.Frame):
     def __init__(self, master):
@@ -640,8 +644,8 @@ class RecordsView(tk.Frame):
         s = self.search_var.get().strip()
         if s:
             q += """ AND (station LIKE ? OR user LIKE ? OR event_id LIKE ?
-                         OR comments LIKE ? OR notes LIKE ?)"""
-            params += [f"%{s}%"]*5
+                         OR bfm_number LIKE ? OR comments LIKE ? OR notes LIKE ?)"""
+            params += [f"%{s}%"]*6
         m = self.month_var.get()
         if m != "All":
             mi = str(MONTHS.index(m)+1).zfill(2)
@@ -673,7 +677,8 @@ class RecordsView(tk.Frame):
         for r in rows:
             vals = (r["date"] or "", _fmt_time_12h(r["time"]),
                     r["andon"] or "",
-                    r["event_id"] or "", r["station"] or "", r["user"] or "",
+                    r["event_id"] or "", r["bfm_number"] or "",
+                    r["station"] or "", r["user"] or "",
                     r["criticality"] or "", r["root_cause"] or "",
                     r["comments"] or "",
                     r["ack_date"] or "", _fmt_time_12h(r["ack_time"]),
@@ -781,6 +786,7 @@ class EditDialog(tk.Toplevel):
         ("time",          "Time"),
         ("andon",         "Andon Level"),
         ("event_id",      "Event ID"),
+        ("bfm_number",    "BFM Number"),
         ("station",       "Station / Equipment"),
         ("user",          "User / Reporter"),
         ("criticality",   "Criticality"),
@@ -866,12 +872,13 @@ class EditDialog(tk.Toplevel):
             self._get("resolved_date"), self._get("resolve_time"))
         with get_conn() as conn:
             conn.execute("""UPDATE cms SET
-                date=?, time=?, andon=?, event_id=?, station=?, user=?,
+                date=?, time=?, andon=?, event_id=?, bfm_number=?, station=?, user=?,
                 criticality=?, comments=?, ack_date=?, ack_time=?,
                 resolved_date=?, resolve_time=?, resolution_time=?, root_cause=?, notes=?
                 WHERE id=?""",
                 (self._get("date"), self._get("time"), self._get("andon"),
-                 self._get("event_id"), self._get("station"), self._get("user"),
+                 self._get("event_id"), self._get("bfm_number"),
+                 self._get("station"), self._get("user"),
                  self._get("criticality"), self._get("comments"),
                  self._get("ack_date"), self._get("ack_time"),
                  self._get("resolved_date"), self._get("resolve_time"),
@@ -2804,6 +2811,118 @@ class CMApp(tk.Tk):
         self._analytics.render_all()
         self._mtbf.render()
         self._breakdown.render()
+
+# ─── Embeddable Panel (for integration into AIT_CMMS_REV3) ────────────────────
+
+class CMManagerPanel(tk.Frame):
+    """Self-contained CM Manager that lives inside any parent widget/tab."""
+
+    def __init__(self, master):
+        super().__init__(master, bg=BG)
+        init_db()
+        self._build()
+
+    def _build(self):
+        # ── Sidebar
+        sidebar = tk.Frame(self, bg=BG, width=190)
+        sidebar.pack(side="left", fill="y")
+        sidebar.pack_propagate(False)
+
+        tk.Label(sidebar, text="⚙️", bg=BG, fg=ACCENT,
+                 font=("Segoe UI", 28)).pack(pady=(20, 2))
+        tk.Label(sidebar, text="CM Manager", bg=BG, fg=TEXT,
+                 font=("Segoe UI", 13, "bold")).pack()
+        tk.Label(sidebar, text="Corrective Maintenance", bg=BG, fg=TEXT_DIM,
+                 font=("Segoe UI", 8)).pack(pady=(0, 20))
+
+        ttk.Separator(sidebar, orient="horizontal").pack(fill="x", padx=10, pady=4)
+
+        self._nav_buttons = {}
+        self._active_tab = tk.StringVar(value="dashboard")
+        nav_items = [
+            ("🏠", "Dashboard",     "dashboard"),
+            ("➕", "New CM",        "new"),
+            ("📋", "All Records",   "records"),
+            ("📊", "Analytics",     "analytics"),
+            ("⏱",  "MTBF",          "mtbf"),
+            ("📈", "Top Breakdown", "breakdown"),
+            ("📥", "Import",        "import_"),
+        ]
+        for icon, lbl, key in nav_items:
+            btn = tk.Button(sidebar, text=f"  {icon}  {lbl}",
+                            bg=BG, fg=TEXT_DIM, relief="flat",
+                            font=FONT_BODY, anchor="w", cursor="hand2",
+                            padx=10, pady=10,
+                            command=lambda k=key: self._switch(k))
+            btn.pack(fill="x", padx=8, pady=2)
+            self._nav_buttons[key] = btn
+
+        tk.Label(sidebar, text=f"DB: {os.path.basename(DB_FILE)}",
+                 bg=BG, fg=TEXT_DIM, font=("Segoe UI", 7),
+                 wraplength=160).pack(side="bottom", pady=12)
+
+        # ── Main content area
+        self._content = tk.Frame(self, bg=BG2)
+        self._content.pack(side="right", fill="both", expand=True)
+
+        self._pages = {}
+        self._dashboard = DashboardView(self._content, on_edit_cb=self._after_save)
+        self._pages["dashboard"] = self._dashboard
+
+        self._analytics = AnalyticsView(self._content)
+        self._pages["analytics"] = self._analytics
+
+        self._records = RecordsView(self._content)
+        self._pages["records"] = self._records
+
+        self._entry = EntryForm(self._content, self._after_save)
+        self._pages["new"] = self._entry
+
+        self._import_view = ImportView(self._content, self._after_import)
+        self._pages["import_"] = self._import_view
+
+        self._mtbf = MTBFView(self._content)
+        self._pages["mtbf"] = self._mtbf
+
+        self._breakdown = TopBreakdownView(self._content)
+        self._pages["breakdown"] = self._breakdown
+
+        self._switch("dashboard")
+
+    def _switch(self, key):
+        for p in self._pages.values():
+            p.pack_forget()
+        self._pages[key].pack(fill="both", expand=True)
+        self._active_tab.set(key)
+        for k, btn in self._nav_buttons.items():
+            btn.configure(
+                bg=ACCENT if k == key else BG,
+                fg="white" if k == key else TEXT_DIM)
+
+    def _after_save(self):
+        self._records.prio_var.set("All")
+        for lbl, (btn, afg, abg) in self._records._prio_btns.items():
+            btn.configure(
+                bg=ACCENT if lbl == "All" else BG3,
+                fg="white" if lbl == "All" else TEXT_DIM,
+                relief="flat", highlightthickness=0)
+        self._records.station_var.set("All")
+        self._records.month_var.set("All")
+        self._records.year_var.set(str(datetime.now().year))
+        self._records.search_var.set("")
+        self._records.load()
+        self._dashboard.refresh()
+        self._analytics.render_all()
+        self._mtbf.render()
+        self._breakdown.render()
+
+    def _after_import(self):
+        self._records.load()
+        self._dashboard.refresh()
+        self._analytics.render_all()
+        self._mtbf.render()
+        self._breakdown.render()
+
 
 if __name__ == "__main__":
     app = CMApp()
