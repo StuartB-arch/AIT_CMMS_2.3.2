@@ -300,19 +300,29 @@ class PartsOrderPanel(tk.Frame):
             messagebox.showerror("Save Failed", str(exc))
 
     def _write_excel(self, save_path):
-        # Load template if it exists, otherwise build from scratch
-        if os.path.exists(TEMPLATE_PATH):
-            wb = openpyxl.load_workbook(TEMPLATE_PATH)
-            ws = wb[SHEET_NAME] if SHEET_NAME in wb.sheetnames else wb.active
-        else:
-            wb = openpyxl.Workbook()
-            ws = wb.active
-            ws.title = SHEET_NAME
-            self._write_template_skeleton(ws)
+        import shutil
+
+        if not os.path.exists(TEMPLATE_PATH):
+            messagebox.showerror(
+                "Template Missing",
+                f"Cannot find the master template:\n{TEMPLATE_PATH}\n\n"
+                "Please ensure 'Purchase Req_MASTER.xlsx' is in the same "
+                "folder as the application.")
+            return
+
+        # Copy the template byte-for-byte so every colour, border, merge,
+        # row height, column width and formula is preserved exactly.
+        shutil.copy2(TEMPLATE_PATH, save_path)
+
+        # Open the copy and write ONLY the data values — never touch styles.
+        wb = openpyxl.load_workbook(save_path)
+        ws = wb[SHEET_NAME] if SHEET_NAME in wb.sheetnames else wb.active
 
         # ── Header cells ────────────────────────────────────────────────────
         ws["B2"] = self.issuer_var.get().strip()
-        ws["B3"] = self.date_var.get().strip()
+        # B3 keeps the =TODAY() formula — just ensure it is still there
+        if not str(ws["B3"].value or "").startswith("="):
+            ws["B3"] = self.date_var.get().strip()
         ws["B4"] = self.requestor_var.get().strip()
         ws["B5"] = SHIP_TO
 
@@ -325,22 +335,23 @@ class PartsOrderPanel(tk.Frame):
             if xl_row > 29:
                 break
 
-            def gv(col):
-                return rw.get(col, tk.StringVar()).get().strip()
+            def gv(col, _rw=rw):
+                return _rw.get(col, tk.StringVar()).get().strip()
 
-            ws.cell(xl_row, 2).value  = _safe_num(gv("Qty"))           # B
-            ws.cell(xl_row, 3).value  = gv("Description")              # C
-            ws.cell(xl_row, 4).value  = gv("Supplier Name")            # D
-            ws.cell(xl_row, 5).value  = gv("Part #")                   # E
-            ws.cell(xl_row, 7).value  = _safe_num(gv("Unit Price"))    # G
-            ws.cell(xl_row, 9).value  = gv("Date Required")            # I
-            ws.cell(xl_row, 10).value = gv("CP Related (Y/N)")         # J
-            ws.cell(xl_row, 11).value = gv("If YES, CP #")             # K
-            ws.cell(xl_row, 12).value = gv("Quote Number")             # L
-            ws.cell(xl_row, 13).value = gv("Approved By")              # M
-            ws.cell(xl_row, 14).value = gv("Leadtime")                 # N
-            ws.cell(xl_row, 15).value = gv("New Supplier (Y/N)")       # O
-            ws.cell(xl_row, 16).value = gv("Reason New Supplier Is Needed")  # P
+            ws.cell(xl_row, 2).value  = _safe_num(gv("Qty"))
+            ws.cell(xl_row, 3).value  = gv("Description")
+            ws.cell(xl_row, 4).value  = gv("Supplier Name")
+            ws.cell(xl_row, 5).value  = gv("Part #")
+            ws.cell(xl_row, 7).value  = _safe_num(gv("Unit Price"))
+            # H column keeps its =SUM(Bx*Gx) formula from the template
+            ws.cell(xl_row, 9).value  = gv("Date Required")
+            ws.cell(xl_row, 10).value = gv("CP Related (Y/N)")
+            ws.cell(xl_row, 11).value = gv("If YES, CP #")
+            ws.cell(xl_row, 12).value = gv("Quote Number")
+            ws.cell(xl_row, 13).value = gv("Approved By")
+            ws.cell(xl_row, 14).value = gv("Leadtime")
+            ws.cell(xl_row, 15).value = gv("New Supplier (Y/N)")
+            ws.cell(xl_row, 16).value = gv("Reason New Supplier Is Needed")
 
             # Quote Link — F column (col 6)
             quote_raw = gv("Quote Link")
@@ -353,45 +364,12 @@ class PartsOrderPanel(tk.Frame):
                 else:
                     ws.cell(xl_row, 6).value = quote_raw
 
-            # Ext. Price formula (H)
-            qty_addr = f"B{xl_row}"
-            uprice_addr = f"G{xl_row}"
-            ws.cell(xl_row, 8).value = f"=SUM({qty_addr}*{uprice_addr})"
-
-        # Clear any leftover data from previous saves beyond our rows
+        # Clear data-only cells beyond the submitted rows (keep formulas/style)
         for xl_row in range(7 + len(self._rows), 30):
-            for col in range(2, 17):
-                if col != 8:  # keep Ext. Price formula
-                    ws.cell(xl_row, col).value = None
+            for col in (2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16):
+                ws.cell(xl_row, col).value = None
 
         wb.save(save_path)
-
-    def _write_template_skeleton(self, ws):
-        """Builds header labels in case the template file is missing."""
-        ws["A2"] = "Issuer:"
-        ws["A3"] = "Date:"
-        ws["I3"] = "Purchase Requisition"
-        ws["A4"] = "Airbus Requestor:"
-        ws["A5"] = "Ship to:"
-        ws["A6"] = "Job ID Parent :13382-ABA"
-        # Column headers row 6
-        for col_num, header in enumerate(
-            ["Qty", "Description", "Supplier Name", "Part #",
-             "Quote Link", "Unit Price", "Ext. Price",
-             "Date Required", "CP Related (Y/N)", "If YES, CP #",
-             "Quote Number", "Approved By", "Leadtime",
-             "New Supplier (Y/N)", "Reason New Supplier Is Needed"],
-            start=2
-        ):
-            ws.cell(6, col_num).value = header
-            ws.cell(6, col_num).font = Font(bold=True)
-        # Ext. Price formulas
-        for row in range(7, 30):
-            ws.cell(row, 8).value = f"=SUM(B{row}*G{row})"
-        # Total
-        ws["H30"] = "=SUM(H7:H29)"
-        ws["A30"] = "Requested By: _________________________________________"
-        ws["A31"] = "Authorized By:_________________________________________"
 
 
 # ── Utility helpers ───────────────────────────────────────────────────────────
