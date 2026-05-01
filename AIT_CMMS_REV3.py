@@ -3,11 +3,6 @@
 AIT Complete CMMS - Computerized Maintenance Management System
 Fully functional CMMS with automatic PM scheduling, technician assignment, and comprehensive reporting
 """
-import shutil, pathlib
-_here = pathlib.Path(__file__).parent
-_cache = _here / "__pycache__"
-if _cache.exists():
-    shutil.rmtree(_cache, ignore_errors=True)
 from datetime import datetime, timedelta
 from mro_stock_module import MROStockManager
 from cm_parts_integration import CMPartsIntegration
@@ -18,7 +13,6 @@ from user_management_ui import UserManagementDialog
 from password_change_ui import show_password_change_dialog
 from backup_ui import BackupUI
 from csv_manager import CSVManager
-from cm_manager__1_ import CMManagerPanel, init_db as cm_init_db
 from parts_order_module import PartsOrderPanel
 import shutil
 import tkinter as tk
@@ -28,11 +22,6 @@ from datetime import datetime, timedelta
 import json
 import os
 import traceback
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.lib import colors
 import calendar
 import random
 import math
@@ -45,7 +34,7 @@ from enum import Enum
 import sys
 try:
     from reportlab.lib.pagesizes import letter
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, Image
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import inch
     from reportlab.lib import colors
@@ -10466,16 +10455,27 @@ class AITCMMSSystem:
                      font=('Segoe UI', 11)).pack(expand=True)
 
     def create_cm_manager_tab(self):
-        """Embed the CM Manager as a full-featured notebook tab."""
+        """Embed the CM Manager as a full-featured notebook tab (lazy-loaded on first click)."""
         cm_frame = ttk.Frame(self.notebook)
         self.notebook.add(cm_frame, text="CM Manager")
+        self._cm_frame = cm_frame
+        self._cm_panel_built = False
+        self.notebook.bind("<<NotebookTabChanged>>", self._lazy_init_cm_tab, add="+")
+
+    def _lazy_init_cm_tab(self, event=None):
+        """Initialize the CM Manager panel the first time its tab is selected."""
+        if self._cm_panel_built:
+            return
         try:
-            cm_init_db()
-            panel = CMManagerPanel(cm_frame)
-            panel.pack(fill="both", expand=True)
+            selected = self.notebook.select()
+            if self.notebook.index(selected) == self.notebook.index(self._cm_frame):
+                self._cm_panel_built = True
+                from cm_manager__1_ import CMManagerPanel, init_db as cm_init_db
+                cm_init_db()
+                panel = CMManagerPanel(self._cm_frame)
+                panel.pack(fill="both", expand=True)
         except Exception as e:
-            import tkinter as tk
-            tk.Label(cm_frame, text=f"CM Manager failed to load:\n{e}",
+            tk.Label(self._cm_frame, text=f"CM Manager failed to load:\n{e}",
                      font=('Segoe UI', 11)).pack(expand=True)
 
 
