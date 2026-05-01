@@ -338,6 +338,7 @@ class PartsOrderPanel(tk.Frame):
             def gv(col, _rw=rw):
                 return _rw.get(col, tk.StringVar()).get().strip()
 
+            ws.cell(xl_row, 1).value  = job_id
             ws.cell(xl_row, 2).value  = _safe_num(gv("Qty"))
             ws.cell(xl_row, 3).value  = gv("Description")
             ws.cell(xl_row, 4).value  = gv("Supplier Name")
@@ -366,7 +367,7 @@ class PartsOrderPanel(tk.Frame):
 
         # Clear data-only cells beyond the submitted rows (keep formulas/style)
         for xl_row in range(7 + len(self._rows), 30):
-            for col in (2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16):
+            for col in (1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16):
                 ws.cell(xl_row, col).value = None
 
         wb.save(save_path)
