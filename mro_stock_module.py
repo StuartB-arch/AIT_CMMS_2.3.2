@@ -8,7 +8,6 @@ from tkinter import ttk, messagebox, filedialog
 from datetime import datetime
 import os
 import threading
-from PIL import Image, ImageTk
 import shutil
 import csv
 import io
@@ -1160,6 +1159,11 @@ class MROStockManager:
             pic_frame.grid(row=row, column=1, sticky='w', padx=20, pady=10)
 
             # Display Picture 1
+            try:
+                from PIL import Image, ImageTk
+                _pil_ok = True
+            except ImportError:
+                _pil_ok = False
             pic1_displayed = False
             if pic1_data:
                 try:
