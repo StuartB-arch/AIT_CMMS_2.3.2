@@ -1038,8 +1038,8 @@ class AnalyticsView(tk.Frame):
             frm = tk.Frame(self.nb, bg=BG2)
             self.nb.add(frm, text=label)
             self._tab_frames[key] = frm
-
-        self.render_all()
+            tk.Label(frm, text="Click  🔄 Refresh  to load charts",
+                     bg=BG2, fg=TEXT_DIM, font=("Segoe UI", 13)).pack(expand=True)
 
     def _refresh_analytics_stations(self):
         """Populate the station dropdown from all stations in the DB."""
@@ -2019,7 +2019,8 @@ class MTBFView(tk.Frame):
         # ── Scroll area ───────────────────────────────────────────────────────
         self._scroll_outer = tk.Frame(self, bg=BG2)
         self._scroll_outer.pack(fill="both", expand=True, padx=4, pady=6)
-        self.render()
+        tk.Label(self._scroll_outer, text="Click  🔄 Refresh  to load charts",
+                 bg=BG2, fg=TEXT_DIM, font=("Segoe UI", 13)).pack(expand=True)
 
     def _export_all(self):
         if not self._figs:
@@ -2355,7 +2356,8 @@ class TopBreakdownView(tk.Frame):
 
         self._scroll_outer = tk.Frame(self, bg=BG2)
         self._scroll_outer.pack(fill="both", expand=True, padx=4, pady=6)
-        self.render()
+        tk.Label(self._scroll_outer, text="Click  🔄 Refresh  to load charts",
+                 bg=BG2, fg=TEXT_DIM, font=("Segoe UI", 13)).pack(expand=True)
 
     def _refresh_stations(self):
         with get_conn() as conn:

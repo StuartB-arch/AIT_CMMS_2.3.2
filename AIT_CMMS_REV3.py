@@ -6814,6 +6814,16 @@ class AITCMMSSystem:
 
         threading.Thread(target=_background, daemon=True).start()
 
+        def _preload_cm():
+            """Pre-import matplotlib/pandas/numpy in background so CM tab opens instantly."""
+            try:
+                import cm_manager__1_  # noqa: F401  — warms sys.modules cache
+                print("[Startup] CM Manager pre-load complete")
+            except Exception as _e:
+                print(f"WARNING [CM pre-load]: {_e}")
+
+        threading.Thread(target=_preload_cm, daemon=True).start()
+
     def _csv_sync_async(self, bfm_no: str):
         """Update one equipment row in the CSV from the DB in a background thread."""
         import threading
