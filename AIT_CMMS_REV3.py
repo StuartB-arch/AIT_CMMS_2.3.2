@@ -6815,10 +6815,14 @@ class AITCMMSSystem:
         threading.Thread(target=_background, daemon=True).start()
 
         def _preload_cm():
-            """Pre-import matplotlib/pandas/numpy in background so CM tab opens instantly."""
+            """Pre-import matplotlib/pandas/numpy in background so CM tab opens instantly.
+            Only imports thread-safe libraries — tkinter modules must stay on the main thread."""
             try:
-                import cm_manager__1_  # noqa: F401  — warms sys.modules cache
-                print("[Startup] CM Manager pre-load complete")
+                import matplotlib  # noqa: F401
+                import matplotlib.pyplot  # noqa: F401
+                import pandas  # noqa: F401
+                import numpy  # noqa: F401
+                print("[Startup] CM Manager heavy libraries pre-load complete")
             except Exception as _e:
                 print(f"WARNING [CM pre-load]: {_e}")
 
