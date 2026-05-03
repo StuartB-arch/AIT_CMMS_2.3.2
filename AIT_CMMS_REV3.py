@@ -13,7 +13,10 @@ from user_management_ui import UserManagementDialog
 from password_change_ui import show_password_change_dialog
 from backup_ui import BackupUI
 from csv_manager import CSVManager
-from parts_order_module import PartsOrderPanel
+try:
+    from parts_order_module import PartsOrderPanel
+except ImportError:
+    PartsOrderPanel = None
 import shutil
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -10460,11 +10463,15 @@ class AITCMMSSystem:
         """Embed the Parts Orders / Purchase Requisition form as a notebook tab."""
         po_frame = ttk.Frame(self.notebook)
         self.notebook.add(po_frame, text="Parts Orders")
+        if PartsOrderPanel is None:
+            tk.Label(po_frame,
+                     text="Parts Orders module not found.\nEnsure parts_order_module.py is in the application folder.",
+                     font=('Segoe UI', 11)).pack(expand=True)
+            return
         try:
             panel = PartsOrderPanel(po_frame)
             panel.pack(fill="both", expand=True)
         except Exception as e:
-            import tkinter as tk
             tk.Label(po_frame, text=f"Parts Orders failed to load:\n{e}",
                      font=('Segoe UI', 11)).pack(expand=True)
 
