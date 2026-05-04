@@ -16530,7 +16530,7 @@ class AITCMMSSystem:
             print(f"ERROR in load_recent_completions: {e}")
 
     def search_pm_completions(self):
-        """Search pm_completions by BFM number and/or SAP number."""
+        """Search pm_completions by BFM number and/or SAP number across all history."""
         if not hasattr(self, 'recent_completions_tree'):
             return
 
@@ -16548,10 +16548,11 @@ class AITCMMSSystem:
             params = []
 
             if bfm_query:
-                conditions.append("pc.bfm_equipment_no ILIKE %s")
+                # CAST to TEXT so LIKE works even when the column has INTEGER affinity
+                conditions.append("CAST(pc.bfm_equipment_no AS TEXT) LIKE %s")
                 params.append(f"%{bfm_query}%")
             if sap_query:
-                conditions.append("e.sap_material_no ILIKE %s")
+                conditions.append("CAST(COALESCE(e.sap_material_no, '') AS TEXT) LIKE %s")
                 params.append(f"%{sap_query}%")
 
             where_clause = " AND ".join(conditions)
@@ -16561,13 +16562,15 @@ class AITCMMSSystem:
                        pc.pm_type, pc.technician_name,
                        (pc.labor_hours + pc.labor_minutes/60.0) as total_hours
                 FROM pm_completions pc
-                LEFT JOIN equipment e ON pc.bfm_equipment_no = e.bfm_equipment_no
+                LEFT JOIN equipment e ON CAST(pc.bfm_equipment_no AS TEXT) = CAST(e.bfm_equipment_no AS TEXT)
                 WHERE {where_clause}
                 ORDER BY pc.completion_date DESC, pc.id DESC
             ''', params)
 
             completions = cursor.fetchall()
             cursor.close()
+
+            print(f"DEBUG search_pm_completions: query='{bfm_query or sap_query}' found {len(completions)} rows")
 
             for item in self.recent_completions_tree.get_children():
                 self.recent_completions_tree.delete(item)
