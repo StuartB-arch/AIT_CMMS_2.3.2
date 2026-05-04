@@ -517,30 +517,93 @@ class PMEligibilityChecker:
 
         # Get recent completions
         recent_completions = self.completion_repo.get_recent_completions(equipment.bfm_no, days=400)
-        
-        # Check for recent completions of same type
+
+        # --- Weekly PM fast-path ---
+        # Weekly PMs recur every single week. Use week_start as the scheduling
+        # boundary instead of datetime.now() so that equipment completed anywhere
+        # during the PREVIOUS calendar week is correctly treated as due again.
+        if pm_type == PMType.WEEKLY:
+            # Block if a monthly or annual PM was completed THIS week
+            for conflicting_type in (PMType.MONTHLY, PMType.ANNUAL):
+                conflict_completions = [c for c in recent_completions if c.pm_type == conflicting_type]
+                if conflict_completions:
+                    latest_conflict = max(conflict_completions, key=lambda x: x.completion_date)
+                    if latest_conflict.completion_date >= week_start:
+                        return PMEligibilityResult(
+                            PMStatus.CONFLICTED,
+                            f"Weekly blocked - {conflicting_type.value} PM completed this week "
+                            f"({latest_conflict.completion_date.strftime('%Y-%m-%d')})"
+                        )
+
+            # Block if already in this week's schedule
+            scheduled_pms = self.completion_repo.get_scheduled_pms(week_start, equipment.bfm_no)
+            if any(s['pm_type'] == PMType.WEEKLY.value for s in scheduled_pms):
+                return PMEligibilityResult(PMStatus.CONFLICTED, "Already scheduled for this week")
+
+            # Eligible unless completed on or after week_start
+            weekly_completions = [c for c in recent_completions if c.pm_type == PMType.WEEKLY]
+            if weekly_completions:
+                latest_weekly = max(weekly_completions, key=lambda x: x.completion_date)
+                if latest_weekly.completion_date >= week_start:
+                    return PMEligibilityResult(
+                        PMStatus.RECENTLY_COMPLETED,
+                        f"Weekly PM already completed this week "
+                        f"({latest_weekly.completion_date.strftime('%Y-%m-%d')})"
+                    )
+                days_since_last = (week_start - latest_weekly.completion_date).days
+                days_overdue = days_since_last - 7
+                priority = min(500 + days_overdue * 10, 999) if days_overdue > 0 else 300
+                return PMEligibilityResult(
+                    PMStatus.DUE,
+                    f"Weekly PM due (last: {latest_weekly.completion_date.strftime('%Y-%m-%d')}, "
+                    f"{days_since_last} days ago, source: pm_completions_table)",
+                    priority_score=priority
+                )
+            else:
+                # Fall back to equipment table
+                last_date_str = equipment.last_weekly_date
+                last_completion_date = self.date_parser.parse_flexible(last_date_str)
+                if last_completion_date and last_completion_date >= week_start:
+                    return PMEligibilityResult(PMStatus.RECENTLY_COMPLETED,
+                                               "Weekly PM completed this week")
+                if not last_completion_date:
+                    return PMEligibilityResult(PMStatus.DUE,
+                                               "Weekly PM never completed - HIGH PRIORITY",
+                                               priority_score=1100)
+                days_since_last = (week_start - last_completion_date).days
+                days_overdue = days_since_last - 7
+                priority = min(500 + days_overdue * 10, 999) if days_overdue > 0 else 300
+                return PMEligibilityResult(
+                    PMStatus.DUE,
+                    f"Weekly PM due (last: {last_completion_date.strftime('%Y-%m-%d')}, "
+                    f"{days_since_last} days ago, source: equipment_table)",
+                    priority_score=priority
+                )
+        # --- End Weekly PM fast-path ---
+
+        # Check for recent completions of same type (monthly / six-month / annual)
         same_type_completions = [c for c in recent_completions if c.pm_type == pm_type]
         if same_type_completions:
             latest_completion = max(same_type_completions, key=lambda x: x.completion_date)
             days_since = (datetime.now() - latest_completion.completion_date).days
-            
+
             min_interval = self._get_minimum_interval(pm_type)
             if days_since < min_interval:
                 return PMEligibilityResult(
-                    PMStatus.RECENTLY_COMPLETED, 
+                    PMStatus.RECENTLY_COMPLETED,
                     f"{pm_type.value} PM completed {days_since} days ago (min interval: {min_interval})"
                 )
-        
+
         # Check for cross-PM conflicts
         conflict_result = self._check_cross_pm_conflicts(recent_completions, pm_type)
         if conflict_result.status == PMStatus.CONFLICTED:
             return conflict_result
-        
+
         # Check if already scheduled
         scheduled_pms = self.completion_repo.get_scheduled_pms(week_start, equipment.bfm_no)
         if any(s['pm_type'] == pm_type.value for s in scheduled_pms):
             return PMEligibilityResult(PMStatus.CONFLICTED, f"Already scheduled for this week")
-        
+
         # Check if due based on equipment table dates
         return self._check_due_date(equipment, pm_type, recent_completions)
     
