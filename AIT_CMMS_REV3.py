@@ -1081,20 +1081,33 @@ class PMSchedulingService:
                 (week_start_str,)
             )
 
-            # Expire old uncompleted schedules (>2 weeks old) to prevent permanent blocking.
-            # Without this, any equipment that was scheduled in a previous week but not
-            # completed would be permanently blocked from rescheduling because the
-            # eligibility checker treats any uncompleted schedule as a conflict.
+            # Expire ALL previous uncompleted Weekly PM schedules so they never block
+            # re-scheduling. Weekly PMs must recur every week; an uncompleted prior-week
+            # schedule should not prevent this week's schedule from being generated.
+            cursor.execute('''
+                UPDATE weekly_pm_schedules
+                SET status = 'Expired'
+                WHERE week_start_date < %s
+                AND status = 'Scheduled'
+                AND pm_type = 'Weekly'
+            ''', (week_start_str,))
+            weekly_expired = cursor.rowcount
+            if weekly_expired > 0:
+                print(f"DEBUG: Expired {weekly_expired} uncompleted Weekly PM schedules from previous weeks")
+
+            # Expire non-weekly uncompleted schedules older than 2 weeks to prevent
+            # permanent blocking of monthly/six-month/annual PMs.
             two_weeks_ago = (week_start - timedelta(days=14)).strftime('%Y-%m-%d')
             cursor.execute('''
                 UPDATE weekly_pm_schedules
                 SET status = 'Expired'
                 WHERE week_start_date < %s
                 AND status = 'Scheduled'
+                AND pm_type != 'Weekly'
             ''', (two_weeks_ago,))
             expired_count = cursor.rowcount
             if expired_count > 0:
-                print(f"DEBUG: Expired {expired_count} old uncompleted schedules (older than 2 weeks)")
+                print(f"DEBUG: Expired {expired_count} old uncompleted non-weekly schedules (older than 2 weeks)")
 
             # Load scheduled PMs AFTER deletion so the cache reflects the clean state.
             # Previously this was loaded BEFORE deletion, which left stale entries in
