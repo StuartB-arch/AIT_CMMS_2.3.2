@@ -1181,7 +1181,13 @@ class PMSchedulingService:
 
             # Get equipment list
             equipment_list = self._get_active_equipment()
-            print(f"DEBUG: Found {len(equipment_list)} active equipment items")
+            equipment_weekly_count = sum(1 for e in equipment_list if e.has_weekly)
+            equipment_monthly_count = sum(1 for e in equipment_list if e.has_monthly)
+            equipment_sixmonth_count = sum(1 for e in equipment_list if e.has_six_month)
+            equipment_annual_count = sum(1 for e in equipment_list if e.has_annual)
+            print(f"DEBUG: Found {len(equipment_list)} active equipment items "
+                  f"(Weekly:{equipment_weekly_count} Monthly:{equipment_monthly_count} "
+                  f"6Mo:{equipment_sixmonth_count} Annual:{equipment_annual_count})")
 
             # Check if there's any equipment to schedule
             if not equipment_list or len(equipment_list) == 0:
@@ -1233,7 +1239,14 @@ class PMSchedulingService:
                 'success': True,
                 'total_assignments': len(scheduled_assignments),
                 'unique_assets': len(set(a['bfm_no'] for a in scheduled_assignments)),
-                'assignments': scheduled_assignments
+                'assignments': scheduled_assignments,
+                'diag_active_equipment': len(equipment_list),
+                'diag_weekly_equipment': equipment_weekly_count,
+                'diag_monthly_equipment': equipment_monthly_count,
+                'diag_sixmonth_equipment': equipment_sixmonth_count,
+                'diag_annual_equipment': equipment_annual_count,
+                'diag_potential_assignments': len(assignments),
+                'diag_target': weekly_pm_target,
             }
 
         except Exception as e:
@@ -22428,12 +22441,24 @@ class AITCMMSSystem:
                         f"  P1: {p1}  |  P2: {p2}  |  P3: {p3}  |  P4: {p4}"
                         if (p1 + p2 + p3 + p4) else ""
                     )
+                    diag = (
+                        f"\n\n── Diagnostic ──\n"
+                        f"Active equipment in pool: {result.get('diag_active_equipment', '?')}\n"
+                        f"  Weekly PM: {result.get('diag_weekly_equipment', '?')}  "
+                        f"Monthly: {result.get('diag_monthly_equipment', '?')}  "
+                        f"6-Mo: {result.get('diag_sixmonth_equipment', '?')}  "
+                        f"Annual: {result.get('diag_annual_equipment', '?')}\n"
+                        f"Eligible after all checks: {result.get('diag_potential_assignments', '?')}\n"
+                        f"Target (cap): {result.get('diag_target', '?')}  "
+                        f"Scheduled: {result['total_assignments']}"
+                    )
                     messagebox.showinfo(
                         "Scheduling Complete",
                         f"Generated {result['total_assignments']} PM assignments for week {week_start}\n\n"
                         f"Priority breakdown:\n{priority_summary}\n\n"
                         f"Unique assets: {result['unique_assets']}\n"
                         f"Skydrol hydraulic PM tasks added: {skydrol_added}"
+                        f"{diag}"
                     )
 
                 # Refresh displays – wrapped in its own handler so a display
