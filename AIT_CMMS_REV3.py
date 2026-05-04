@@ -11634,22 +11634,57 @@ class AITCMMSSystem:
         ttk.Button(buttons_frame, text="Create CM from PM",
                 command=self.create_cm_from_pm_dialog).pack(side='left', padx=5)
         
-        # Recent completions
-        recent_frame = ttk.LabelFrame(self.pm_completion_frame, text="Recent PM Completions", padding=10)
+        # PM Completion Records with search
+        recent_frame = ttk.LabelFrame(self.pm_completion_frame, text="PM Completion Records (Double-click to save Certificate PDF)", padding=10)
         recent_frame.pack(fill='both', expand=True, padx=10, pady=5)
-        
-        self.recent_completions_tree = ttk.Treeview(recent_frame,
-                                                  columns=('Date', 'BFM', 'PM Type', 'Technician', 'Hours'),
+
+        # Search bar
+        search_bar_frame = ttk.Frame(recent_frame)
+        search_bar_frame.pack(fill='x', pady=(0, 6))
+
+        ttk.Label(search_bar_frame, text="Search by BFM #:", font=('Arial', 9, 'bold')).pack(side='left', padx=(0, 4))
+        self.completion_search_bfm_var = tk.StringVar()
+        bfm_search_entry = ttk.Entry(search_bar_frame, textvariable=self.completion_search_bfm_var, width=18)
+        bfm_search_entry.pack(side='left', padx=(0, 10))
+
+        ttk.Label(search_bar_frame, text="Search by SAP #:", font=('Arial', 9, 'bold')).pack(side='left', padx=(0, 4))
+        self.completion_search_sap_var = tk.StringVar()
+        sap_search_entry = ttk.Entry(search_bar_frame, textvariable=self.completion_search_sap_var, width=18)
+        sap_search_entry.pack(side='left', padx=(0, 10))
+
+        ttk.Button(search_bar_frame, text="Search",
+                   command=self.search_pm_completions).pack(side='left', padx=(0, 5))
+        ttk.Button(search_bar_frame, text="Clear / Show Recent",
+                   command=self.clear_pm_completion_search).pack(side='left', padx=(0, 10))
+
+        self.completion_search_status_var = tk.StringVar(value="Showing last 100 completions. Use search to find by BFM or SAP.")
+        ttk.Label(search_bar_frame, textvariable=self.completion_search_status_var,
+                  foreground='gray', font=('Arial', 8)).pack(side='left')
+
+        bfm_search_entry.bind('<Return>', lambda e: self.search_pm_completions())
+        sap_search_entry.bind('<Return>', lambda e: self.search_pm_completions())
+
+        # Treeview with scrollbar
+        tree_frame = ttk.Frame(recent_frame)
+        tree_frame.pack(fill='both', expand=True)
+
+        self.recent_completions_tree = ttk.Treeview(tree_frame,
+                                                  columns=('Date', 'BFM', 'SAP', 'PM Type', 'Technician', 'Hours'),
                                                   show='headings')
-        
-        for col in ('Date', 'BFM', 'PM Type', 'Technician', 'Hours'):
+
+        col_widths = {'Date': 100, 'BFM': 100, 'SAP': 90, 'PM Type': 90, 'Technician': 140, 'Hours': 70}
+        for col in ('Date', 'BFM', 'SAP', 'PM Type', 'Technician', 'Hours'):
             self.recent_completions_tree.heading(col, text=col)
-            self.recent_completions_tree.column(col, width=120)
-        
+            self.recent_completions_tree.column(col, width=col_widths[col])
+
+        vsb = ttk.Scrollbar(tree_frame, orient='vertical', command=self.recent_completions_tree.yview)
+        self.recent_completions_tree.configure(yscrollcommand=vsb.set)
+        vsb.pack(side='right', fill='y')
         self.recent_completions_tree.pack(fill='both', expand=True)
+
         self.recent_completions_tree.bind('<Double-1>', self.on_completion_double_click)
         self.recent_completions_tree.bind('<<TreeviewSelect>>', self.on_completion_select)
-        
+
         # Load recent completions
         self.load_recent_completions()
         
@@ -12125,18 +12160,17 @@ class AITCMMSSystem:
         selection = self.recent_completions_tree.selection()
         if not selection:
             return
-    
-        # Get the selected item's values
+
         item = self.recent_completions_tree.item(selection[0])
         values = item['values']
-    
+
+        # columns: Date[0], BFM[1], SAP[2], PM Type[3], Technician[4], Hours[5]
         if len(values) >= 5:
             completion_date = values[0]
-            bfm_no = values[1] 
-            pm_type = values[2]
-            technician = values[3]
-        
-            # Get full completion details from database
+            bfm_no = values[1]
+            pm_type = values[3]
+            technician = values[4]
+
             self.generate_pm_completion_pdf(completion_date, bfm_no, pm_type, technician)
 
     def on_completion_select(self, event):
@@ -12145,22 +12179,19 @@ class AITCMMSSystem:
         if not selection:
             return
 
-        # Get the selected item's values
         item = self.recent_completions_tree.item(selection[0])
         values = item['values']
 
+        # columns: Date[0], BFM[1], SAP[2], PM Type[3], Technician[4], Hours[5]
         if len(values) >= 5:
-            completion_date = values[0]
             bfm_no = values[1]
-            pm_type = values[2]
-            technician = values[3]
+            pm_type = values[3]
+            technician = values[4]
 
-            # Populate the form fields with the selected completion data
             self.completion_bfm_var.set(bfm_no)
             self.pm_type_var.set(pm_type)
             self.completion_tech_var.set(technician)
 
-            # Update status bar to confirm selection
             if hasattr(self, 'update_status'):
                 self.update_status(f"Selected equipment {bfm_no} from recent completions")
 
@@ -12179,10 +12210,11 @@ class AITCMMSSystem:
             messagebox.showerror("Error", "Invalid selection")
             return
 
+        # columns: Date[0], BFM[1], SAP[2], PM Type[3], Technician[4], Hours[5]
         completion_date = values[0]
         bfm_no = values[1]
-        pm_type = values[2]
-        technician = values[3]
+        pm_type = values[3]
+        technician = values[4]
 
         try:
             cursor = self.conn.cursor()
@@ -12392,11 +12424,17 @@ class AITCMMSSystem:
                 messagebox.showerror("Error", "Could not find completion details")
                 return
             
-            # Add just the title parameter
+            safe_bfm = bfm_no_str.replace('/', '_').replace('\\', '_')
+            safe_date = completion_date_str[:10].replace('-', '')
+            default_name = f"PM_Certificate_{safe_bfm}_{pm_type_str}_{safe_date}.pdf"
+
             filename = filedialog.asksaveasfilename(
-                title="Save PM Completion Document"
+                title="Save PM Completion Certificate",
+                initialfile=default_name,
+                defaultextension=".pdf",
+                filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")]
             )
-        
+
             if filename:
                 self.create_pm_completion_pdf(completion_data, filename)
             
@@ -12523,7 +12561,13 @@ class AITCMMSSystem:
         
             # Ask if user wants to open the PDF
             if messagebox.askyesno("Open Document", "Would you like to open the PDF document now?"):
-                os.startfile(filename)  # Windows
+                import sys, subprocess
+                if sys.platform.startswith('win'):
+                    os.startfile(filename)
+                elif sys.platform.startswith('darwin'):
+                    subprocess.Popen(['open', filename])
+                else:
+                    subprocess.Popen(['xdg-open', filename])
             
         except Exception as e:
             messagebox.showerror("PDF Creation Error", f"Failed to create PDF: {str(e)}")
@@ -16446,7 +16490,7 @@ class AITCMMSSystem:
         self.next_annual_pm_var.set('')
     
     def load_recent_completions(self):
-        """Load recent PM completions"""
+        """Load recent PM completions (last 100), with SAP number."""
         if not hasattr(self, 'recent_completions_tree'):
             return
 
@@ -16454,31 +16498,107 @@ class AITCMMSSystem:
             cursor = self.conn.cursor()
 
             cursor.execute('''
-                SELECT completion_date, bfm_equipment_no, pm_type, technician_name,
-                    (labor_hours + labor_minutes/60.0) as total_hours
-                FROM pm_completions
-                ORDER BY completion_date DESC, id DESC LIMIT 100
+                SELECT pc.completion_date, pc.bfm_equipment_no, e.sap_material_no,
+                       pc.pm_type, pc.technician_name,
+                       (pc.labor_hours + pc.labor_minutes/60.0) as total_hours
+                FROM pm_completions pc
+                LEFT JOIN equipment e ON pc.bfm_equipment_no = e.bfm_equipment_no
+                ORDER BY pc.completion_date DESC, pc.id DESC
+                LIMIT 100
             ''')
 
             completions = cursor.fetchall()
             cursor.close()
 
-            # Clear existing items
             for item in self.recent_completions_tree.get_children():
                 self.recent_completions_tree.delete(item)
 
-            # Add recent completions
             for completion in completions:
-                completion_date, bfm_no, pm_type, technician, total_hours = completion
+                completion_date, bfm_no, sap_no, pm_type, technician, total_hours = completion
                 hours_display = f"{total_hours:.1f}h" if total_hours else "0.0h"
                 self.recent_completions_tree.insert('', 'end', values=(
-                    completion_date, bfm_no, pm_type, technician, hours_display
+                    completion_date, bfm_no, sap_no or '', pm_type, technician, hours_display
                 ))
 
+            if hasattr(self, 'completion_search_status_var'):
+                self.completion_search_status_var.set(
+                    f"Showing last {len(completions)} completions. Use search to find by BFM or SAP."
+                )
             print(f"Refreshed: {len(completions)} recent completions loaded")
 
         except Exception as e:
             print(f"ERROR in load_recent_completions: {e}")
+
+    def search_pm_completions(self):
+        """Search pm_completions by BFM number and/or SAP number."""
+        if not hasattr(self, 'recent_completions_tree'):
+            return
+
+        bfm_query = self.completion_search_bfm_var.get().strip()
+        sap_query = self.completion_search_sap_var.get().strip()
+
+        if not bfm_query and not sap_query:
+            self.load_recent_completions()
+            return
+
+        try:
+            cursor = self.conn.cursor()
+
+            conditions = []
+            params = []
+
+            if bfm_query:
+                conditions.append("pc.bfm_equipment_no ILIKE %s")
+                params.append(f"%{bfm_query}%")
+            if sap_query:
+                conditions.append("e.sap_material_no ILIKE %s")
+                params.append(f"%{sap_query}%")
+
+            where_clause = " AND ".join(conditions)
+
+            cursor.execute(f'''
+                SELECT pc.completion_date, pc.bfm_equipment_no, e.sap_material_no,
+                       pc.pm_type, pc.technician_name,
+                       (pc.labor_hours + pc.labor_minutes/60.0) as total_hours
+                FROM pm_completions pc
+                LEFT JOIN equipment e ON pc.bfm_equipment_no = e.bfm_equipment_no
+                WHERE {where_clause}
+                ORDER BY pc.completion_date DESC, pc.id DESC
+            ''', params)
+
+            completions = cursor.fetchall()
+            cursor.close()
+
+            for item in self.recent_completions_tree.get_children():
+                self.recent_completions_tree.delete(item)
+
+            for completion in completions:
+                completion_date, bfm_no, sap_no, pm_type, technician, total_hours = completion
+                hours_display = f"{total_hours:.1f}h" if total_hours else "0.0h"
+                self.recent_completions_tree.insert('', 'end', values=(
+                    completion_date, bfm_no, sap_no or '', pm_type, technician, hours_display
+                ))
+
+            parts = []
+            if bfm_query:
+                parts.append(f"BFM='{bfm_query}'")
+            if sap_query:
+                parts.append(f"SAP='{sap_query}'")
+            self.completion_search_status_var.set(
+                f"Found {len(completions)} record(s) matching {', '.join(parts)}. Double-click to save PDF."
+            )
+
+        except Exception as e:
+            print(f"ERROR in search_pm_completions: {e}")
+            messagebox.showerror("Search Error", f"Search failed: {str(e)}")
+
+    def clear_pm_completion_search(self):
+        """Clear search fields and reload the recent 100 completions."""
+        if hasattr(self, 'completion_search_bfm_var'):
+            self.completion_search_bfm_var.set('')
+        if hasattr(self, 'completion_search_sap_var'):
+            self.completion_search_sap_var.set('')
+        self.load_recent_completions()
     
     def generate_current_week_report(self):
         """Generate report for current week"""
